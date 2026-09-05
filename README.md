@@ -2,6 +2,14 @@
 
 一个聚合多个项目 Markdown 文档的本地阅读和编辑工具。
 
+## 下载安装
+
+[下载 ZDocs v0.1.4（macOS Apple Silicon）](https://github.com/zdpeazy/zdocs-reader/releases/download/v0.1.4/ZDocs_0.1.4_aarch64.dmg)
+
+也可以前往 [Releases 页面](https://github.com/zdpeazy/zdocs-reader/releases) 查看所有版本。
+
+> 当前安装包适用于 Apple Silicon Mac。由于尚未经过 Apple Developer 公证，如果首次打开被 macOS 阻止，请前往“系统设置 → 隐私与安全性”，点击“仍要打开”。
+
 ## 开发
 
 ```bash
