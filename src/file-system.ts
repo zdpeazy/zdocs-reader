@@ -167,3 +167,13 @@ export async function copyText(content: string) {
   textarea.remove();
   if (!copied) throw new Error("复制失败");
 }
+
+export function revealInFinder(doc: DocFile) {
+  if (!doc.nativePath) throw new Error("仅桌面端支持在 Finder 中打开");
+  return invoke<void>("reveal_in_finder", { path: doc.nativePath });
+}
+
+export function renameMarkdown(doc: DocFile, newName: string) {
+  if (!doc.nativePath) throw new Error("仅桌面端支持重命名");
+  return invoke<string>("rename_markdown", { path: doc.nativePath, newName });
+}

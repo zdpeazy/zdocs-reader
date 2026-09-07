@@ -3,16 +3,17 @@ import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
-import { createProjectDoc, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, requestReadPermission, supportsDirectoryPicker, writeDoc } from "./file-system";
+import { copyText, createProjectDoc, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
 
-type DeferredAction = { type: "open"; doc: DocFile } | { type: "remove"; projectId: string };
+type DeferredAction = { type: "open"; doc: DocFile } | { type: "remove"; projectId: string } | { type: "export-pdf"; doc: DocFile };
 type PendingDialog =
   | { kind: "unsaved"; action: DeferredAction }
   | { kind: "remove"; projectId: string; projectName: string }
   | { kind: "conflict"; diskContent: string; diskModified: number }
+  | { kind: "rename"; doc: DocFile }
   | { kind: "shortcuts" };
 
 function readStoredList(key: string) {
@@ -35,10 +36,13 @@ export default function App() {
   const [mode, setMode] = useState<ViewMode>(() => (localStorage.getItem("zdocs:view-mode") as ViewMode) || "source");
   const [notice, setNotice] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem("zdocs:sidebar-width")) || 276);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("zdocs:sidebar-collapsed") === "true");
+  const [renameValue, setRenameValue] = useState("");
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
 
   useEffect(() => localStorage.setItem("zdocs:view-mode", mode), [mode]);
   useEffect(() => localStorage.setItem("zdocs:sidebar-width", String(sidebarWidth)), [sidebarWidth]);
+  useEffect(() => localStorage.setItem("zdocs:sidebar-collapsed", String(sidebarCollapsed)), [sidebarCollapsed]);
   useEffect(() => localStorage.setItem("zdocs:favorites", JSON.stringify(favoriteIds)), [favoriteIds]);
   useEffect(() => localStorage.setItem("zdocs:recent", JSON.stringify(recentIds)), [recentIds]);
   useEffect(() => localStorage.setItem("zdocs:theme", theme), [theme]);
@@ -216,6 +220,12 @@ export default function App() {
     }
   }
 
+  async function refreshProject(project: DocsProject) {
+    if (project.rootPath) return projectFromPath(project.rootPath, project.id);
+    if (project.rootHandle) return projectFromHandle(project.rootHandle, project.id);
+    return project;
+  }
+
   function toggleFavorite() {
     if (!activeDoc) return;
     setFavoriteIds((current) => current.includes(activeDoc.id) ? current.filter((id) => id !== activeDoc.id) : [activeDoc.id, ...current]);
@@ -269,10 +279,10 @@ export default function App() {
 
   async function runDeferredAction(action: DeferredAction) {
     if (action.type === "open") await performOpenDoc(action.doc);
-    else {
+    else if (action.type === "remove") {
       const project = projects.find((item) => item.id === action.projectId);
       if (project) setDialog({ kind: "remove", projectId: project.id, projectName: project.name });
-    }
+    } else await performExportPdf(action.doc);
   }
 
   async function saveThenRun(action: DeferredAction) {
@@ -282,18 +292,70 @@ export default function App() {
 
   const activeProject = projects.find((project) => project.id === activeDoc?.projectId);
 
-  function reorderProjects(draggedId: string, targetId: string) {
+  function reorderProjects(draggedId: string, targetId: string, position: "before" | "after") {
     if (draggedId === targetId) return;
     setProjects((current) => {
       const from = current.findIndex((project) => project.id === draggedId);
-      const to = current.findIndex((project) => project.id === targetId);
-      if (from < 0 || to < 0) return current;
+      if (from < 0 || !current.some((project) => project.id === targetId)) return current;
       const next = [...current];
       const [dragged] = next.splice(from, 1);
-      next.splice(to, 0, dragged);
+      const targetIndex = next.findIndex((project) => project.id === targetId);
+      next.splice(targetIndex + (position === "after" ? 1 : 0), 0, dragged);
       localStorage.setItem("zdocs:project-order", JSON.stringify(next.map((project) => project.id)));
       return next;
     });
+  }
+
+  async function performExportPdf(doc: DocFile) {
+    if (doc.id !== activeDoc?.id) await performOpenDoc(doc);
+    setMode("preview");
+    setNotice("正在准备 PDF，请在打印窗口选择“存储为 PDF”");
+    window.setTimeout(() => { setNotice(undefined); window.print(); }, 1000);
+  }
+
+  function exportPdf(doc: DocFile) {
+    if (doc.id !== activeDoc?.id && source !== savedSource) {
+      setDialog({ kind: "unsaved", action: { type: "export-pdf", doc } });
+      return;
+    }
+    void performExportPdf(doc);
+  }
+
+  async function submitRename(doc: DocFile) {
+    const project = projects.find((item) => item.id === doc.projectId);
+    if (!project) return;
+    try {
+      const newNativePath = await renameMarkdown(doc, renameValue);
+      const refreshed = await refreshProject(project);
+      const renamedDoc = refreshed.files.find((item) => item.nativePath === newNativePath);
+      if (!renamedDoc) throw new Error("重命名后未找到文件");
+      setProjects((current) => current.map((item) => item.id === project.id ? refreshed : item));
+      setFavoriteIds((current) => current.map((id) => id === doc.id ? renamedDoc.id : id));
+      setRecentIds((current) => current.map((id) => id === doc.id ? renamedDoc.id : id));
+      setLarkBindings((current) => {
+        if (!current[doc.id]) return current;
+        const next = { ...current, [renamedDoc.id]: current[doc.id] };
+        delete next[doc.id];
+        return next;
+      });
+      if (activeDoc?.id === doc.id) { setActiveDoc(renamedDoc); localStorage.setItem("zdocs:last-doc", renamedDoc.id); }
+      setDialog(undefined);
+      setNotice(`已重命名为“${renamedDoc.name}”`);
+      window.setTimeout(() => setNotice(undefined), 1800);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重命名失败");
+    }
+  }
+
+  function handleDocAction(action: "reveal" | "copy-path" | "rename" | "export-pdf", doc: DocFile) {
+    if (action === "export-pdf") { exportPdf(doc); return; }
+    if (action === "rename") { setRenameValue(doc.name); setDialog({ kind: "rename", doc }); return; }
+    void (async () => {
+      try {
+        if (action === "reveal") await revealInFinder(doc);
+        else { if (!doc.nativePath) throw new Error("仅桌面端支持复制绝对路径"); await copyText(doc.nativePath); setNotice("绝对路径已复制"); window.setTimeout(() => setNotice(undefined), 1600); }
+      } catch (error) { setNotice(error instanceof Error ? error.message : "操作失败"); }
+    })();
   }
 
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -316,9 +378,9 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
       <div
-        className="sidebar-resizer"
+        className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
         aria-label="调整目录宽度"
         aria-orientation="vertical"
@@ -352,6 +414,10 @@ export default function App() {
         { label: "取消", onClick: () => setDialog(undefined) },
         { label: "重新加载磁盘版本", onClick: () => { setSource(dialog.diskContent); setSavedSource(dialog.diskContent); setLoadedLastModified(dialog.diskModified); setDialog(undefined); } },
         { label: "用当前内容覆盖", variant: "danger", onClick: () => { setDialog(undefined); void saveActiveDoc(true); } },
+      ]} />}
+      {dialog?.kind === "rename" && <Dialog title="重命名文档" description={<label className="rename-field"><span>文件名</span><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onFocus={(event) => { const dot = event.currentTarget.value.toLowerCase().lastIndexOf(".md"); event.currentTarget.setSelectionRange(0, dot > 0 ? dot : event.currentTarget.value.length); }} onKeyDown={(event) => { if (event.key === "Enter" && renameValue.trim()) void submitRename(dialog.doc); }} /></label>} onClose={() => setDialog(undefined)} actions={[
+        { label: "取消", onClick: () => setDialog(undefined) },
+        { label: "确认重命名", variant: "primary", onClick: () => void submitRename(dialog.doc) },
       ]} />}
       {dialog?.kind === "shortcuts" && <Dialog title="快捷键" description={<div className="shortcut-list"><span>全局搜索 <kbd>⌘ K</kbd></span><span>添加项目 <kbd>⌘ O</kbd></span><span>保存文档 <kbd>⌘ S</kbd></span><span>关闭弹窗 <kbd>Esc</kbd></span><span>编辑器查找 <kbd>⌘ F</kbd></span></div>} onClose={() => setDialog(undefined)} actions={[{ label: "知道了", variant: "primary", onClick: () => setDialog(undefined) }]} />}
       {larkOpen && <LarkDialog projects={projects} activeDoc={activeDoc} source={source} binding={activeDoc ? larkBindings[activeDoc.id] : undefined} onClose={() => setLarkOpen(false)} onImported={importFromLark} onPublished={bindPublishedDocument} />}

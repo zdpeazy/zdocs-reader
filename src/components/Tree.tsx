@@ -6,15 +6,16 @@ interface TreeProps {
   nodes: TreeNode[];
   activeId?: string;
   onOpen: (doc: DocFile) => void;
+  onContextMenu: (event: React.MouseEvent, doc: DocFile) => void;
   depth?: number;
 }
 
-export function Tree({ nodes, activeId, onOpen, depth = 0 }: TreeProps) {
+export function Tree({ nodes, activeId, onOpen, onContextMenu, depth = 0 }: TreeProps) {
   return (
     <div className="tree" role={depth === 0 ? "tree" : "group"}>
       {nodes.map((node) =>
         node.type === "folder" ? (
-          <FolderItem key={node.path} node={node} activeId={activeId} onOpen={onOpen} depth={depth} />
+          <FolderItem key={node.path} node={node} activeId={activeId} onOpen={onOpen} onContextMenu={onContextMenu} depth={depth} />
         ) : (
           <button
             type="button"
@@ -23,6 +24,7 @@ export function Tree({ nodes, activeId, onOpen, depth = 0 }: TreeProps) {
             className={`tree-row file-row ${activeId === node.doc.id ? "active" : ""}`}
             style={{ paddingLeft: 34 + depth * 20 }}
             onClick={() => onOpen(node.doc)}
+            onContextMenu={(event) => onContextMenu(event, node.doc)}
             title={node.path}
           >
             <FileText size={15} />
@@ -34,7 +36,7 @@ export function Tree({ nodes, activeId, onOpen, depth = 0 }: TreeProps) {
   );
 }
 
-function FolderItem({ node, activeId, onOpen, depth }: { node: Extract<TreeNode, { type: "folder" }>; activeId?: string; onOpen: (doc: DocFile) => void; depth: number }) {
+function FolderItem({ node, activeId, onOpen, onContextMenu, depth }: { node: Extract<TreeNode, { type: "folder" }>; activeId?: string; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; depth: number }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -50,7 +52,7 @@ function FolderItem({ node, activeId, onOpen, depth }: { node: Extract<TreeNode,
         {open ? <FolderOpen size={15} /> : <Folder size={15} />}
         <span>{node.name}</span>
       </button>
-      {open && <Tree nodes={node.children} activeId={activeId} onOpen={onOpen} depth={depth + 1} />}
+      {open && <Tree nodes={node.children} activeId={activeId} onOpen={onOpen} onContextMenu={onContextMenu} depth={depth + 1} />}
     </div>
   );
 }

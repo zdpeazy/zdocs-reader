@@ -130,6 +130,27 @@ fn copy_text(content: String) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err("复制源码失败".into()) }
 }
 
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path).canonicalize().map_err(|error| error.to_string())?;
+    let status = Command::new("open").arg("-R").arg(path).status().map_err(|error| error.to_string())?;
+    if status.success() { Ok(()) } else { Err("无法在 Finder 中定位文件".into()) }
+}
+
+#[tauri::command]
+fn rename_markdown(path: String, new_name: String) -> Result<String, String> {
+    let source = PathBuf::from(path).canonicalize().map_err(|error| error.to_string())?;
+    let mut name = new_name.trim().to_string();
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+        return Err("文件名无效，请勿包含路径分隔符".into());
+    }
+    if !name.to_lowercase().ends_with(".md") { name.push_str(".md"); }
+    let target = source.parent().ok_or("无法定位文件目录")?.join(name);
+    if target.exists() && target != source { return Err("同名文件已存在".into()); }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 fn lark_binary() -> Result<PathBuf, String> {
     if let Ok(output) = Command::new("which").arg("lark-cli").output() {
         if output.status.success() { return Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())); }
@@ -190,7 +211,7 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, lark_status, lark_import, lark_publish])
+        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, reveal_in_finder, rename_markdown, lark_status, lark_import, lark_publish])
         .run(tauri::generate_context!())
         .expect("error while running ZDocs");
 }
