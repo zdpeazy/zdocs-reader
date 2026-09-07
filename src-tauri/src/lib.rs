@@ -6,8 +6,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    thread,
-    time::Duration,
 };
 
 #[derive(Serialize)]
@@ -173,56 +171,16 @@ img, svg {{ max-width: 100%; height: auto; }} a {{ color: #b54829; }} pre, table
 }
 
 fn export_document_blocking(output_path: String, format: String, title: String, html: String) -> Result<String, String> {
-    let extension = if format == "pdf" { "pdf" } else if format == "docx" { "docx" } else { return Err("不支持的导出格式".into()); };
+    if format != "docx" { return Err("该命令仅用于 Word 文档导出".into()); }
     let mut output = PathBuf::from(output_path);
-    if output.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case(extension)).unwrap_or(true) {
-        output.set_extension(extension);
+    if output.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case("docx")).unwrap_or(true) {
+        output.set_extension("docx");
     }
     let export_id = format!("zdocs-export-{}", std::process::id());
     let temp = std::env::temp_dir().join(format!("{}.html", export_id));
-    let chrome_profile = std::env::temp_dir().join(format!("{}-profile", export_id));
     fs::write(&temp, html_document(&title, &html)).map_err(|error| error.to_string())?;
-    let result = if format == "docx" {
-        Command::new("textutil").args(["-convert", "docx", "-output"]).arg(&output).arg(&temp).status()
-    } else {
-        let chrome = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ].iter().find(|candidate| Path::new(candidate).exists()).ok_or("导出 PDF 需要安装 Chrome、Edge 或 Chromium")?;
-        let mut child = Command::new(chrome)
-            .arg("--headless=new")
-            .arg("--disable-gpu")
-            .arg("--disable-extensions")
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg("--no-pdf-header-footer")
-            .arg(format!("--user-data-dir={}", chrome_profile.to_string_lossy()))
-            .arg(format!("--print-to-pdf={}", output.to_string_lossy()))
-            .arg(format!("file://{}", temp.to_string_lossy()))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        match child.as_mut() {
-            Err(error) => Err(std::io::Error::new(error.kind(), error.to_string())),
-            Ok(process) => {
-                let mut completed = None;
-                for _ in 0..200 {
-                    match process.try_wait() {
-                        Ok(Some(status)) => { completed = Some(Ok(status)); break; }
-                        Ok(None) => thread::sleep(Duration::from_millis(100)),
-                        Err(error) => { completed = Some(Err(error)); break; }
-                    }
-                }
-                match completed {
-                    Some(result) => result,
-                    None => { let _ = process.kill(); let _ = process.wait(); return Err("PDF 生成超时，请重试".into()); }
-                }
-            }
-        }
-    };
+    let result = Command::new("/usr/bin/textutil").args(["-convert", "docx", "-output"]).arg(&output).arg(&temp).status();
     let _ = fs::remove_file(&temp);
-    let _ = fs::remove_dir_all(&chrome_profile);
     let status = result.map_err(|error| error.to_string())?;
     if !status.success() || !output.exists() { return Err("文档生成失败，请检查保存位置权限".into()); }
     Ok(output.to_string_lossy().to_string())
@@ -233,6 +191,17 @@ async fn export_document(output_path: String, format: String, title: String, htm
     tauri::async_runtime::spawn_blocking(move || export_document_blocking(output_path, format, title, html))
         .await
         .map_err(|error| format!("导出任务执行失败：{}", error))?
+}
+
+#[tauri::command]
+fn write_pdf_file(output_path: String, base64_data: String) -> Result<String, String> {
+    let mut output = PathBuf::from(output_path);
+    if output.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case("pdf")).unwrap_or(true) {
+        output.set_extension("pdf");
+    }
+    let data = STANDARD.decode(base64_data).map_err(|error| format!("PDF 数据无效：{}", error))?;
+    fs::write(&output, data).map_err(|error| format!("PDF 保存失败：{}", error))?;
+    Ok(output.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -323,7 +292,7 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, download_update, open_external_link, lark_status, lark_import, lark_publish])
+        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, download_update, open_external_link, lark_status, lark_import, lark_publish])
         .run(tauri::generate_context!())
         .expect("error while running ZDocs");
 }

@@ -5,7 +5,7 @@ import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
-import { copyAbsolutePath, createProjectDoc, downloadUpdate, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
+import { copyAbsolutePath, createProjectDoc, downloadUpdate, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc, writePdfFile } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -348,8 +348,9 @@ export default function App() {
       try {
         const article = document.querySelector<HTMLElement>(".preview-pane .markdown-body");
         if (!article) throw new Error("预览内容尚未准备完成，请重试");
-        const html = formatExportHtml(article);
-        const savedPath = await exportDocument(outputPath, format, baseName, html);
+        const savedPath = format === "pdf"
+          ? await writePdfFile(outputPath, await createPdfBase64(article))
+          : await exportDocument(outputPath, format, baseName, formatExportHtml(article));
         setNotice(`已导出到 ${savedPath}`);
         window.setTimeout(() => setNotice(undefined), 3500);
       } catch (error) { setNotice(error instanceof Error ? error.message : "导出失败"); }
@@ -491,4 +492,34 @@ function formatExportHtml(article: HTMLElement) {
     target.removeAttribute("class");
   });
   return clone.innerHTML;
+}
+
+async function createPdfBase64(article: HTMLElement) {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  await Promise.all(Array.from(article.querySelectorAll("img")).map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => { image.addEventListener("load", () => resolve(), { once: true }); image.addEventListener("error", () => resolve(), { once: true }); })));
+  const canvas = await html2canvas(article, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+  const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 32;
+  const printableWidth = pageWidth - margin * 2;
+  const printableHeight = pageHeight - margin * 2;
+  const scale = printableWidth / canvas.width;
+  const sliceHeight = Math.max(1, Math.floor(printableHeight / scale));
+  let page = 0;
+  for (let top = 0; top < canvas.height; top += sliceHeight) {
+    const height = Math.min(sliceHeight, canvas.height - top);
+    const slice = document.createElement("canvas");
+    slice.width = canvas.width;
+    slice.height = height;
+    slice.getContext("2d")?.drawImage(canvas, 0, top, canvas.width, height, 0, 0, canvas.width, height);
+    if (page > 0) pdf.addPage();
+    pdf.addImage(slice.toDataURL("image/jpeg", .94), "JPEG", margin, margin, printableWidth, height * scale, undefined, "FAST");
+    page += 1;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+  const bytes = new Uint8Array(pdf.output("arraybuffer"));
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return btoa(binary);
 }

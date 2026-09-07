@@ -187,6 +187,10 @@ export function exportDocument(outputPath: string, format: "pdf" | "docx", title
   return invoke<string>("export_document", { outputPath, format, title, html });
 }
 
+export function writePdfFile(outputPath: string, base64Data: string) {
+  return invoke<string>("write_pdf_file", { outputPath, base64Data });
+}
+
 export function openExternalLink(url: string) {
   if (isDesktop()) return invoke<void>("open_external_link", { url });
   window.open(url, "_blank", "noopener,noreferrer");

@@ -1,7 +1,7 @@
 {
   "name": "zdocs-reader",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,8 @@
     "@uiw/react-codemirror": "^4.25.11",
     "@vitejs/plugin-react": "latest",
     "dompurify": "^3.4.14",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "katex": "^0.18.5",
     "lucide-react": "latest",
     "marked": "latest",
