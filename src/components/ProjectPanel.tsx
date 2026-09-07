@@ -16,7 +16,7 @@ interface ProjectPanelProps {
   onReorder: (draggedId: string, targetId: string, position: "before" | "after") => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  onDocAction: (action: "reveal" | "copy-path" | "rename" | "export-pdf", doc: DocFile) => void;
+  onDocAction: (action: "reveal" | "copy-path" | "rename" | "export-pdf" | "export-docx", doc: DocFile) => void;
   favoriteIds: string[];
   recentIds: string[];
   theme: "light" | "dark";
@@ -82,7 +82,7 @@ export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemov
   function showDocMenu(event: React.MouseEvent, doc: DocFile) {
     event.preventDefault();
     const menuWidth = 218;
-    const menuHeight = 174;
+    const menuHeight = 216;
     setContextMenu({ x: Math.min(event.clientX, window.innerWidth - menuWidth - 8), y: Math.min(event.clientY, window.innerHeight - menuHeight - 8), doc });
   }
 
@@ -143,6 +143,7 @@ export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemov
         { action: "copy-path" as const, label: "复制绝对路径", icon: <Copy size={15} /> },
         { action: "rename" as const, label: "重命名", icon: <Pencil size={15} /> },
         { action: "export-pdf" as const, label: "导出 PDF…", icon: <FileOutput size={15} /> },
+        { action: "export-docx" as const, label: "导出 Word…", icon: <FileOutput size={15} /> },
       ].map((item) => <button key={item.action} type="button" role="menuitem" onClick={() => { onDocAction(item.action, contextMenu.doc); setContextMenu(undefined); }}>{item.icon}<span>{item.label}</span></button>)}</div>}
     </aside>
   );

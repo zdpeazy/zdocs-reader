@@ -173,7 +173,22 @@ export function revealInFinder(doc: DocFile) {
   return invoke<void>("reveal_in_finder", { path: doc.nativePath });
 }
 
+export function copyAbsolutePath(doc: DocFile) {
+  if (!doc.nativePath) throw new Error("仅桌面端支持复制绝对路径");
+  return invoke<void>("copy_path", { path: doc.nativePath });
+}
+
 export function renameMarkdown(doc: DocFile, newName: string) {
   if (!doc.nativePath) throw new Error("仅桌面端支持重命名");
   return invoke<string>("rename_markdown", { path: doc.nativePath, newName });
+}
+
+export function exportDocument(outputPath: string, format: "pdf" | "docx", title: string, html: string) {
+  return invoke<string>("export_document", { outputPath, format, title, html });
+}
+
+export function openExternalLink(url: string) {
+  if (isDesktop()) return invoke<void>("open_external_link", { url });
+  window.open(url, "_blank", "noopener,noreferrer");
+  return Promise.resolve();
 }

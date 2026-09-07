@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
-import { copyText, createProjectDoc, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
+import { copyAbsolutePath, createProjectDoc, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
 
-type DeferredAction = { type: "open"; doc: DocFile } | { type: "remove"; projectId: string } | { type: "export-pdf"; doc: DocFile };
+type DeferredAction = { type: "open"; doc: DocFile } | { type: "remove"; projectId: string } | { type: "export"; doc: DocFile; format: "pdf" | "docx" };
 type PendingDialog =
   | { kind: "unsaved"; action: DeferredAction }
   | { kind: "remove"; projectId: string; projectName: string }
@@ -282,7 +283,7 @@ export default function App() {
     else if (action.type === "remove") {
       const project = projects.find((item) => item.id === action.projectId);
       if (project) setDialog({ kind: "remove", projectId: project.id, projectName: project.name });
-    } else await performExportPdf(action.doc);
+    } else await performExport(action.doc, action.format);
   }
 
   async function saveThenRun(action: DeferredAction) {
@@ -306,19 +307,36 @@ export default function App() {
     });
   }
 
-  async function performExportPdf(doc: DocFile) {
+  async function performExport(doc: DocFile, format: "pdf" | "docx") {
+    if (!isDesktop()) { setNotice("文档导出仅支持桌面端"); return; }
+    const extension = format === "pdf" ? "pdf" : "docx";
+    const baseName = doc.name.replace(/\.md$/i, "");
+    const outputPath = await showSaveDialog({
+      title: format === "pdf" ? "导出 PDF" : "导出 Word 文档",
+      defaultPath: `${baseName}.${extension}`,
+      filters: [{ name: format === "pdf" ? "PDF 文档" : "Word 文档", extensions: [extension] }],
+    });
+    if (!outputPath) return;
     if (doc.id !== activeDoc?.id) await performOpenDoc(doc);
     setMode("preview");
-    setNotice("正在准备 PDF，请在打印窗口选择“存储为 PDF”");
-    window.setTimeout(() => { setNotice(undefined); window.print(); }, 1000);
+    setNotice(`正在生成 ${format === "pdf" ? "PDF" : "Word"} 文档…`);
+    window.setTimeout(async () => {
+      try {
+        const html = document.querySelector<HTMLElement>(".preview-pane .markdown-body")?.innerHTML;
+        if (!html) throw new Error("预览内容尚未准备完成，请重试");
+        const savedPath = await exportDocument(outputPath, format, baseName, html);
+        setNotice(`已导出到 ${savedPath}`);
+        window.setTimeout(() => setNotice(undefined), 3500);
+      } catch (error) { setNotice(error instanceof Error ? error.message : "导出失败"); }
+    }, 1200);
   }
 
-  function exportPdf(doc: DocFile) {
+  function requestExport(doc: DocFile, format: "pdf" | "docx") {
     if (doc.id !== activeDoc?.id && source !== savedSource) {
-      setDialog({ kind: "unsaved", action: { type: "export-pdf", doc } });
+      setDialog({ kind: "unsaved", action: { type: "export", doc, format } });
       return;
     }
-    void performExportPdf(doc);
+    void performExport(doc, format);
   }
 
   async function submitRename(doc: DocFile) {
@@ -347,13 +365,13 @@ export default function App() {
     }
   }
 
-  function handleDocAction(action: "reveal" | "copy-path" | "rename" | "export-pdf", doc: DocFile) {
-    if (action === "export-pdf") { exportPdf(doc); return; }
+  function handleDocAction(action: "reveal" | "copy-path" | "rename" | "export-pdf" | "export-docx", doc: DocFile) {
+    if (action === "export-pdf" || action === "export-docx") { requestExport(doc, action === "export-pdf" ? "pdf" : "docx"); return; }
     if (action === "rename") { setRenameValue(doc.name); setDialog({ kind: "rename", doc }); return; }
     void (async () => {
       try {
         if (action === "reveal") await revealInFinder(doc);
-        else { if (!doc.nativePath) throw new Error("仅桌面端支持复制绝对路径"); await copyText(doc.nativePath); setNotice("绝对路径已复制"); window.setTimeout(() => setNotice(undefined), 1600); }
+        else { await copyAbsolutePath(doc); setNotice(`绝对路径已复制：${doc.nativePath}`); window.setTimeout(() => setNotice(undefined), 2600); }
       } catch (error) { setNotice(error instanceof Error ? error.message : "操作失败"); }
     })();
   }

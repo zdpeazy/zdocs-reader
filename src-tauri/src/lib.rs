@@ -123,11 +123,17 @@ fn read_asset(root_path: String, relative_path: String) -> Result<String, String
 
 #[tauri::command]
 fn copy_text(content: String) -> Result<(), String> {
-    let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn().map_err(|error| error.to_string())?;
+    let mut child = Command::new("/usr/bin/pbcopy").env("LANG", "en_US.UTF-8").stdin(Stdio::piped()).spawn().map_err(|error| error.to_string())?;
     child.stdin.as_mut().ok_or("无法访问系统剪贴板")?.write_all(content.as_bytes()).map_err(|error| error.to_string())?;
     drop(child.stdin.take());
     let status = child.wait().map_err(|error| error.to_string())?;
     if status.success() { Ok(()) } else { Err("复制源码失败".into()) }
+}
+
+#[tauri::command]
+fn copy_path(path: String) -> Result<(), String> {
+    let absolute = PathBuf::from(path).canonicalize().map_err(|error| format!("无法读取文件路径：{}", error))?;
+    copy_text(absolute.to_string_lossy().to_string()).map_err(|error| format!("复制绝对路径失败：{}", error))
 }
 
 #[tauri::command]
@@ -149,6 +155,57 @@ fn rename_markdown(path: String, new_name: String) -> Result<String, String> {
     if target.exists() && target != source { return Err("同名文件已存在".into()); }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
     Ok(target.to_string_lossy().to_string())
+}
+
+fn html_document(title: &str, body: &str) -> String {
+    format!(r#"<!doctype html><html><head><meta charset="utf-8"><title>{}</title><style>
+@page {{ size: A4; margin: 18mm 17mm; }}
+body {{ margin: 0; color: #262722; font: 14px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }}
+article {{ max-width: 820px; margin: 0 auto; }}
+h1 {{ font-size: 30px; border-bottom: 1px solid #ddd; padding-bottom: 12px; }} h2 {{ font-size: 22px; margin-top: 32px; }} h3 {{ font-size: 17px; margin-top: 24px; }}
+pre {{ overflow-wrap: anywhere; white-space: pre-wrap; padding: 14px; border-radius: 7px; background: #f1f1ee; }} code {{ font-family: Menlo, monospace; }}
+blockquote {{ margin-left: 0; padding-left: 14px; border-left: 3px solid #d9613c; color: #666; }}
+table {{ width: 100%; border-collapse: collapse; }} th, td {{ padding: 7px 9px; border: 1px solid #d8d8d2; text-align: left; }}
+img, svg {{ max-width: 100%; height: auto; }} a {{ color: #b54829; }} pre, table, img, svg {{ break-inside: avoid; }}
+</style></head><body><article>{}</article></body></html>"#, title.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"), body)
+}
+
+#[tauri::command]
+fn export_document(output_path: String, format: String, title: String, html: String) -> Result<String, String> {
+    let extension = if format == "pdf" { "pdf" } else if format == "docx" { "docx" } else { return Err("不支持的导出格式".into()); };
+    let mut output = PathBuf::from(output_path);
+    if output.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case(extension)).unwrap_or(true) {
+        output.set_extension(extension);
+    }
+    let export_id = format!("zdocs-export-{}", std::process::id());
+    let temp = std::env::temp_dir().join(format!("{}.html", export_id));
+    let chrome_profile = std::env::temp_dir().join(format!("{}-profile", export_id));
+    fs::write(&temp, html_document(&title, &html)).map_err(|error| error.to_string())?;
+    let result = if format == "docx" {
+        Command::new("textutil").args(["-convert", "docx", "-output"]).arg(&output).arg(&temp).status()
+    } else {
+        let chrome = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ].iter().find(|candidate| Path::new(candidate).exists()).ok_or("导出 PDF 需要安装 Chrome、Edge 或 Chromium")?;
+        Command::new(chrome).arg("--headless").arg("--disable-gpu").arg("--no-pdf-header-footer").arg(format!("--user-data-dir={}", chrome_profile.to_string_lossy())).arg(format!("--print-to-pdf={}", output.to_string_lossy())).arg(format!("file://{}", temp.to_string_lossy())).status()
+    };
+    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_dir_all(&chrome_profile);
+    let status = result.map_err(|error| error.to_string())?;
+    if !status.success() || !output.exists() { return Err("文档生成失败，请检查保存位置权限".into()); }
+    Ok(output.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_external_link(url: String) -> Result<(), String> {
+    let normalized = url.trim();
+    if !(normalized.starts_with("https://") || normalized.starts_with("http://") || normalized.starts_with("mailto:")) {
+        return Err("仅支持打开 http、https 或邮件链接".into());
+    }
+    let status = Command::new("open").arg(normalized).status().map_err(|error| error.to_string())?;
+    if status.success() { Ok(()) } else { Err("无法使用系统默认浏览器打开链接".into()) }
 }
 
 fn lark_binary() -> Result<PathBuf, String> {
@@ -211,7 +268,7 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, reveal_in_finder, rename_markdown, lark_status, lark_import, lark_publish])
+        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, open_external_link, lark_status, lark_import, lark_publish])
         .run(tauri::generate_context!())
         .expect("error while running ZDocs");
 }

@@ -89,7 +89,7 @@ body.is-project-dragging { cursor: grabbing; user-select: none; }
 .doc-context-menu { position: fixed; z-index: 320; width: 210px; padding: 6px; border: 1px solid #d5d4cd; border-radius: 9px; background: #fbfaf7ee; box-shadow: 0 14px 38px #24251f32; backdrop-filter: blur(18px); }
 .doc-context-menu button { width: 100%; height: 37px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #464741; font-size: 12px; text-align: left; cursor: pointer; }
 .doc-context-menu button:hover, .doc-context-menu button:focus-visible { outline: none; background: #e8e6df; color: #242520; }
-.doc-context-menu button:last-child { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
+.doc-context-menu button:nth-last-child(2) { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; }
 .status-dot { width: 6px; height: 6px; background: #58a66c; border-radius: 50%; box-shadow: 0 0 0 3px #58a66c22; }
 .reader-shell { min-width: 0; flex: 1; display: flex; flex-direction: column; background: var(--paper); }
 .topbar { height: 51px; flex: 0 0 51px; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 22px; border-bottom: 1px solid var(--line); }
