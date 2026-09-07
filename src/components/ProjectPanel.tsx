@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, FileText, FolderOpen, KeyRound, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, FileText, FolderOpen, GripVertical, KeyRound, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { readDoc } from "../file-system";
 import type { DocFile, DocsProject, TreeNode } from "../types";
@@ -13,6 +13,7 @@ interface ProjectPanelProps {
   onRemove: (projectId: string) => void;
   onRestore: (projectId: string) => void;
   onRefresh: () => void;
+  onReorder: (draggedId: string, targetId: string) => void;
   favoriteIds: string[];
   recentIds: string[];
   theme: "light" | "dark";
@@ -21,15 +22,17 @@ interface ProjectPanelProps {
   onOpenLark: () => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemove, onRestore, onRefresh, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
+  const [draggingId, setDraggingId] = useState<string>();
+  const [dropTargetId, setDropTargetId] = useState<string>();
   const normalized = query.trim().toLowerCase();
   const allFiles = useMemo(() => projects.flatMap((project) => project.files), [projects]);
   const filesById = useMemo(() => new Map(allFiles.map((doc) => [doc.id, doc])), [allFiles]);
   const favoriteDocs = favoriteIds.map((id) => filesById.get(id)).filter((doc): doc is DocFile => Boolean(doc)).slice(0, 6);
-  const recentDocs = recentIds.map((id) => filesById.get(id)).filter((doc): doc is DocFile => Boolean(doc)).slice(0, 6);
+  const recentDocs = recentIds.map((id) => filesById.get(id)).filter((doc): doc is DocFile => Boolean(doc)).slice(0, 3);
 
   useEffect(() => {
     if (normalized.length < 2) { setContentMatches(new Set()); setIsSearching(false); return; }
@@ -80,7 +83,7 @@ export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemov
         {!normalized && recentDocs.length > 0 && <QuickDocs title="最近访问" icon={<Clock3 size={13} />} docs={recentDocs} activeId={activeId} onOpen={onOpen} />}
         {normalized && isSearching && <div className="searching-state"><span />正在搜索正文…</div>}
         {normalized && !isSearching && !hasSearchResults && <div className="search-empty">没有找到“{query.trim()}”<span>试试文件名、路径或正文关键词</span></div>}
-        {visible.map((project) => <ProjectTree key={project.id} project={project} activeId={activeId} onOpen={onOpen} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} />)}
+        {visible.map((project) => <div key={project.id} className={`project-drag-shell ${dropTargetId === project.id && draggingId !== project.id ? "drop-target" : ""}`} onDragOver={(event) => { if (!draggingId) return; event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(project.id); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetId(undefined); }} onDrop={(event) => { event.preventDefault(); if (draggingId) onReorder(draggingId, project.id); setDraggingId(undefined); setDropTargetId(undefined); }}><ProjectTree project={project} activeId={activeId} onOpen={onOpen} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { setDraggingId(project.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project.id); }} onDragEnd={() => { setDraggingId(undefined); setDropTargetId(undefined); }} /></div>)}
         {!projects.length && (
           <div className="sidebar-empty">
             <div className="empty-folder"><FolderOpen size={24} /></div>
@@ -99,13 +102,14 @@ function QuickDocs({ title, icon, docs, activeId, onOpen }: { title: string; ico
   return <section className="quick-section"><div className="quick-title">{icon}{title}</div>{docs.map((doc) => <button key={doc.id} type="button" className={`quick-doc ${doc.id === activeId ? "active" : ""}`} onClick={() => onOpen(doc)} title={doc.path}><FileText size={14} /><span>{doc.name.replace(/\.md$/i, "")}</span></button>)}</section>;
 }
 
-function ProjectTree({ project, activeId, onOpen, onRemove, onRestore, forceOpen }: { project: DocsProject; activeId?: string; onOpen: (doc: DocFile) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean }) {
+function ProjectTree({ project, activeId, onOpen, onRemove, onRestore, forceOpen, onDragStart, onDragEnd }: { project: DocsProject; activeId?: string; onOpen: (doc: DocFile) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void; onDragEnd: () => void }) {
   const [projectOpen, setProjectOpen] = useState(false);
   const showProject = forceOpen || projectOpen;
 
   return (
     <section className="project">
       <div className="project-title">
+        <button className="project-drag-handle" type="button" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} aria-label={`拖动排序 ${project.name}`} title="拖动调整项目顺序"><GripVertical size={14} /></button>
         <button className="collapse-button project-collapse" type="button" aria-expanded={showProject} onClick={() => setProjectOpen((value) => !value)}>
           {showProject ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <span className="project-dot" />

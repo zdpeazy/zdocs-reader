@@ -46,6 +46,12 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     loadStoredProjects().then(async (stored) => {
+      const projectOrder = readStoredList("zdocs:project-order");
+      stored.sort((a, b) => {
+        const aIndex = projectOrder.indexOf(a.id);
+        const bIndex = projectOrder.indexOf(b.id);
+        return (aIndex < 0 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex < 0 ? Number.MAX_SAFE_INTEGER : bIndex);
+      });
       const restored: DocsProject[] = [];
       for (const item of stored) {
         if (item.rootPath) {
@@ -116,6 +122,7 @@ export default function App() {
         return;
       }
       setProjects((current) => [...current, project]);
+      localStorage.setItem("zdocs:project-order", JSON.stringify([...projects.map((item) => item.id), project.id]));
       await storeProject({ id: project.id, name: project.name, rootHandle: project.rootHandle, rootPath: project.rootPath });
       if (!activeDoc && project.files[0]) await performOpenDoc(project.files[0]);
       setNotice(undefined);
@@ -160,7 +167,11 @@ export default function App() {
   }
 
   async function removeProject(id: string) {
-    setProjects((current) => current.filter((item) => item.id !== id));
+    setProjects((current) => {
+      const next = current.filter((item) => item.id !== id);
+      localStorage.setItem("zdocs:project-order", JSON.stringify(next.map((item) => item.id)));
+      return next;
+    });
     await forgetProject(id);
     if (activeDoc?.projectId === id) {
       setActiveDoc(undefined);
@@ -271,6 +282,20 @@ export default function App() {
 
   const activeProject = projects.find((project) => project.id === activeDoc?.projectId);
 
+  function reorderProjects(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    setProjects((current) => {
+      const from = current.findIndex((project) => project.id === draggedId);
+      const to = current.findIndex((project) => project.id === targetId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      const [dragged] = next.splice(from, 1);
+      next.splice(to, 0, dragged);
+      localStorage.setItem("zdocs:project-order", JSON.stringify(next.map((project) => project.id)));
+      return next;
+    });
+  }
+
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
     dragStart.current = { x: event.clientX, width: sidebarWidth };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -291,7 +316,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
       <div
         className="sidebar-resizer"
         role="separator"

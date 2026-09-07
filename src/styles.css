@@ -41,7 +41,13 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .search-empty span { display: block; margin-top: 5px; color: #999a92; font-size: 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .project { margin-bottom: 8px; }
-.project-title { height: 36px; display: flex; align-items: center; padding: 0 8px 0 3px; font-size: 13px; }
+.project-drag-shell { position: relative; border-radius: 5px; }
+.project-drag-shell.drop-target::before { content: ""; position: absolute; z-index: 4; top: -2px; left: 9px; right: 9px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 2px #d9613c20; }
+.project-title { height: 36px; display: flex; align-items: center; padding: 0 8px 0 1px; font-size: 13px; }
+.project-drag-handle { width: 19px; height: 30px; flex: 0 0 19px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #aaa9a2; cursor: grab; opacity: 0; transition: opacity .15s, background .15s; }
+.project-title:hover .project-drag-handle, .project-drag-handle:focus-visible { opacity: 1; }
+.project-drag-handle:hover { background: #dfded8; color: #666760; }
+.project-drag-handle:active { cursor: grabbing; }
 .project-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collapse-button { border: 0; background: transparent; color: inherit; cursor: pointer; }
 .project-collapse { min-width: 0; flex: 1; height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 8px; text-align: left; border-radius: 5px; }
