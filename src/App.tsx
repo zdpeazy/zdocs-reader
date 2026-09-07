@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
-import { copyAbsolutePath, createProjectDoc, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
+import { copyAbsolutePath, createProjectDoc, downloadUpdate, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -16,6 +17,7 @@ type PendingDialog =
   | { kind: "conflict"; diskContent: string; diskModified: number }
   | { kind: "rename"; doc: DocFile }
   | { kind: "shortcuts" };
+type UpdateInfo = { version: string; url: string; fileName: string };
 
 function readStoredList(key: string) {
   try { return JSON.parse(localStorage.getItem(key) ?? "[]") as string[]; } catch { return []; }
@@ -39,6 +41,8 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem("zdocs:sidebar-width")) || 276);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("zdocs:sidebar-collapsed") === "true");
   const [renameValue, setRenameValue] = useState("");
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo>();
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
 
   useEffect(() => localStorage.setItem("zdocs:view-mode", mode), [mode]);
@@ -48,6 +52,26 @@ export default function App() {
   useEffect(() => localStorage.setItem("zdocs:recent", JSON.stringify(recentIds)), [recentIds]);
   useEffect(() => localStorage.setItem("zdocs:theme", theme), [theme]);
   useEffect(() => saveLarkBindings(larkBindings), [larkBindings]);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const current = await getVersion();
+        const response = await fetch("https://api.github.com/repos/zdpeazy/zdocs-reader/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
+        if (!response.ok) return;
+        const release = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ name: string; browser_download_url: string }> };
+        const version = release.tag_name?.replace(/^v/i, "");
+        const asset = release.assets?.find((item) => /aarch64\.dmg$/i.test(item.name)) ?? release.assets?.find((item) => /\.dmg$/i.test(item.name));
+        if (!cancelled && version && asset && isNewerVersion(version, current) && localStorage.getItem("zdocs:dismissed-update") !== version) {
+          setAvailableUpdate({ version, url: asset.browser_download_url, fileName: asset.name });
+        }
+      } catch { /* 离线时静默跳过，避免干扰本地阅读 */ }
+    };
+    void check();
+    const timer = window.setInterval(check, 6 * 60 * 60 * 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     loadStoredProjects().then(async (stored) => {
@@ -322,8 +346,9 @@ export default function App() {
     setNotice(`正在生成 ${format === "pdf" ? "PDF" : "Word"} 文档…`);
     window.setTimeout(async () => {
       try {
-        const html = document.querySelector<HTMLElement>(".preview-pane .markdown-body")?.innerHTML;
-        if (!html) throw new Error("预览内容尚未准备完成，请重试");
+        const article = document.querySelector<HTMLElement>(".preview-pane .markdown-body");
+        if (!article) throw new Error("预览内容尚未准备完成，请重试");
+        const html = formatExportHtml(article);
         const savedPath = await exportDocument(outputPath, format, baseName, html);
         setNotice(`已导出到 ${savedPath}`);
         window.setTimeout(() => setNotice(undefined), 3500);
@@ -417,6 +442,7 @@ export default function App() {
         }}
       />
       <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={setMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} theme={theme} />
+      {availableUpdate && <div className="update-banner" role="status"><span><strong>发现新版本 v{availableUpdate.version}</strong><small>已发布到 GitHub</small></span><button type="button" disabled={isDownloadingUpdate} onClick={() => { setIsDownloadingUpdate(true); setNotice("正在下载更新包…"); void downloadUpdate(availableUpdate.url, availableUpdate.fileName).then((path) => { setNotice(`更新包已下载并打开：${path}`); }).catch((error) => setNotice(error instanceof Error ? error.message : "更新下载失败")).finally(() => setIsDownloadingUpdate(false)); }}>{isDownloadingUpdate ? "下载中…" : "下载更新"}</button><button className="update-dismiss" type="button" aria-label="暂不更新" onClick={() => { localStorage.setItem("zdocs:dismissed-update", availableUpdate.version); setAvailableUpdate(undefined); }}>×</button></div>}
       {notice && <div className="toast" role="alert"><span>{notice}</span><button type="button" onClick={() => setNotice(undefined)}>×</button></div>}
       {!supportsDirectoryPicker() && !isDesktop() && <div className="browser-warning">请使用 Chrome 或 Edge 打开，以授权读取本地项目目录。</div>}
       {dialog?.kind === "unsaved" && <Dialog title="文档尚未保存" description="继续操作前，要保存当前修改吗？" onClose={() => setDialog(undefined)} actions={[
@@ -441,4 +467,28 @@ export default function App() {
       {larkOpen && <LarkDialog projects={projects} activeDoc={activeDoc} source={source} binding={activeDoc ? larkBindings[activeDoc.id] : undefined} onClose={() => setLarkOpen(false)} onImported={importFromLark} onPublished={bindPublishedDocument} />}
     </div>
   );
+}
+
+function isNewerVersion(latest: string, current: string) {
+  const left = latest.split(".").map((value) => Number(value) || 0);
+  const right = current.split(".").map((value) => Number(value) || 0);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    if ((left[index] || 0) !== (right[index] || 0)) return (left[index] || 0) > (right[index] || 0);
+  }
+  return false;
+}
+
+function formatExportHtml(article: HTMLElement) {
+  const clone = article.cloneNode(true) as HTMLElement;
+  const originals = [article, ...Array.from(article.querySelectorAll<HTMLElement>("*"))];
+  const copies = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))];
+  const properties = ["display", "color", "background-color", "font-family", "font-size", "font-weight", "font-style", "line-height", "text-align", "text-decoration", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding-top", "padding-right", "padding-bottom", "padding-left", "border-top", "border-right", "border-bottom", "border-left", "border-radius", "width", "max-width", "vertical-align", "white-space", "list-style-type"];
+  originals.forEach((element, index) => {
+    const target = copies[index];
+    if (!target) return;
+    const computed = window.getComputedStyle(element);
+    properties.forEach((property) => target.style.setProperty(property, computed.getPropertyValue(property)));
+    target.removeAttribute("class");
+  });
+  return clone.innerHTML;
 }

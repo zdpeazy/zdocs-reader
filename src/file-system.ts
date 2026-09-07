@@ -192,3 +192,8 @@ export function openExternalLink(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
   return Promise.resolve();
 }
+
+export function downloadUpdate(url: string, fileName: string) {
+  if (!isDesktop()) throw new Error("自动下载更新仅支持桌面端");
+  return invoke<string>("download_update", { url, fileName });
+}
