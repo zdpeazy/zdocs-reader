@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Eye, FileCode2, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { forwardRef, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { copyText, getProjectFile, openExternalLink, readNativeAsset, resolveRelativePath, savePastedImage } from "../file-system";
 import { parseMarkdown } from "../markdown";
 import type { DocFile, DocsProject, ViewMode } from "../types";
@@ -41,9 +42,9 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
   const wheelDeltaRef = useRef(0);
   const wheelFrameRef = useRef<number | undefined>(undefined);
   const panFrameRef = useRef<number | undefined>(undefined);
-  const zoomScrollFrameRef = useRef<number | undefined>(undefined);
   const [isImagePanning, setIsImagePanning] = useState(false);
   const imageStageRef = useRef<HTMLDivElement>(null);
+  const imageElementRef = useRef<HTMLImageElement>(null);
   const imagePan = useRef<{ x: number; y: number; left: number; top: number } | undefined>(undefined);
   const splitDrag = useRef<{ x: number; ratio: number } | undefined>(undefined);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -116,6 +117,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
   useEffect(() => localStorage.setItem("zdocs:split-ratio", String(splitRatio)), [splitRatio]);
   useEffect(() => { imageScaleRef.current = imageScale; }, [imageScale]);
   useEffect(() => localStorage.setItem("zdocs:reading-settings", JSON.stringify(reading)), [reading]);
+  useEffect(() => { setOutlineCollapsed(mode === "source"); }, [mode]);
   useEffect(() => {
     if (!doc || !previewRef.current) return;
     const pane = previewRef.current;
@@ -163,27 +165,24 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
   };
   const zoomImageAt = (nextScale: number, clientX?: number, clientY?: number) => {
     const stage = imageStageRef.current;
+    const image = imageElementRef.current;
     const previous = imageScaleRef.current;
     const bounded = Math.max(.25, Math.min(5, nextScale));
     const next = bounded < .27 ? .25 : bounded > 4.98 ? 5 : bounded;
-    if (!stage || next === previous) return;
-    const rect = stage.getBoundingClientRect();
-    const widthWasFitted = stage.scrollWidth <= stage.clientWidth + 1;
-    const heightWasFitted = stage.scrollHeight <= stage.clientHeight + 1;
-    const originX = clientX === undefined ? stage.clientWidth / 2 : clientX - rect.left;
-    const originY = clientY === undefined ? stage.clientHeight / 2 : clientY - rect.top;
-    const logicalX = (stage.scrollLeft + originX) / previous;
-    const logicalY = (stage.scrollTop + originY) / previous;
+    if (!stage || !image || next === previous) return;
+    const stageRect = stage.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    const fitsWidth = imageRect.width <= stage.clientWidth + 1;
+    const fitsHeight = imageRect.height <= stage.clientHeight + 1;
+    const anchorX = fitsWidth ? stageRect.left + stage.clientWidth / 2 : clientX ?? stageRect.left + stage.clientWidth / 2;
+    const anchorY = fitsHeight ? stageRect.top + stage.clientHeight / 2 : clientY ?? stageRect.top + stage.clientHeight / 2;
+    const imageX = Math.max(0, Math.min(1, (anchorX - imageRect.left) / Math.max(1, imageRect.width)));
+    const imageY = Math.max(0, Math.min(1, (anchorY - imageRect.top) / Math.max(1, imageRect.height)));
     imageScaleRef.current = next;
-    setImageScale(next);
-    if (zoomScrollFrameRef.current) cancelAnimationFrame(zoomScrollFrameRef.current);
-    zoomScrollFrameRef.current = requestAnimationFrame(() => {
-      zoomScrollFrameRef.current = undefined;
-      const widthIsFitted = stage.scrollWidth <= stage.clientWidth + 1;
-      const heightIsFitted = stage.scrollHeight <= stage.clientHeight + 1;
-      stage.scrollLeft = widthIsFitted ? 0 : widthWasFitted ? (stage.scrollWidth - stage.clientWidth) / 2 : logicalX * next - originX;
-      stage.scrollTop = heightIsFitted ? 0 : heightWasFitted ? (stage.scrollHeight - stage.clientHeight) / 2 : logicalY * next - originY;
-    });
+    flushSync(() => setImageScale(next));
+    const nextRect = image.getBoundingClientRect();
+    stage.scrollLeft = nextRect.width <= stage.clientWidth + 1 ? 0 : stage.scrollLeft + nextRect.left + nextRect.width * imageX - anchorX;
+    stage.scrollTop = nextRect.height <= stage.clientHeight + 1 ? 0 : stage.scrollTop + nextRect.top + nextRect.height * imageY - anchorY;
   };
   if (!doc || !project) return <Welcome />;
   const pathParts = doc.path.split("/");
@@ -240,7 +239,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
         </div>
         <div ref={imageStageRef} className={`image-viewer-stage ${isImagePanning ? "is-panning" : ""}`} onClick={(event) => event.stopPropagation()} onWheel={(event) => { if (!(event.ctrlKey || event.metaKey)) return; event.preventDefault(); wheelDeltaRef.current += event.deltaY; if (wheelFrameRef.current) return; const x = event.clientX; const y = event.clientY; wheelFrameRef.current = requestAnimationFrame(() => { const delta = wheelDeltaRef.current; wheelDeltaRef.current = 0; wheelFrameRef.current = undefined; zoomImageAt(imageScaleRef.current * Math.exp(-delta * .008), x, y); }); }} onPointerDown={(event) => { if (event.button !== 0 || !imageStageRef.current) return; imagePan.current = { x: event.clientX, y: event.clientY, left: imageStageRef.current.scrollLeft, top: imageStageRef.current.scrollTop }; setIsImagePanning(true); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (!imagePan.current || !imageStageRef.current) return; const x = event.clientX; const y = event.clientY; if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current); panFrameRef.current = requestAnimationFrame(() => { if (!imagePan.current || !imageStageRef.current) return; imageStageRef.current.scrollLeft = imagePan.current.left - (x - imagePan.current.x); imageStageRef.current.scrollTop = imagePan.current.top - (y - imagePan.current.y); }); }} onPointerUp={(event) => { imagePan.current = undefined; setIsImagePanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { imagePan.current = undefined; setIsImagePanning(false); }}>
           <div className="image-viewer-canvas" style={imageSize ? { width: imageSize.width * imageScale, height: imageSize.height * imageScale } : undefined}>
-            <img src={imageViewer.src} alt={imageViewer.alt} width={imageSize?.width} height={imageSize?.height} style={{ transform: `scale(${imageScale})` }} onLoad={(event) => { const image = event.currentTarget; setImageSize({ width: image.naturalWidth || image.clientWidth, height: image.naturalHeight || image.clientHeight }); }} draggable={false} />
+            <img ref={imageElementRef} src={imageViewer.src} alt={imageViewer.alt} style={imageSize ? { width: imageSize.width * imageScale, height: imageSize.height * imageScale } : undefined} onLoad={(event) => { const image = event.currentTarget; setImageSize({ width: image.naturalWidth || image.clientWidth, height: image.naturalHeight || image.clientHeight }); }} draggable={false} />
           </div>
         </div>
         {imageViewer.alt && <div className="image-viewer-caption">{imageViewer.alt}</div>}

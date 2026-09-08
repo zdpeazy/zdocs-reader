@@ -48,6 +48,7 @@ export default function App() {
   const [createValue, setCreateValue] = useState("");
   const [temporaryFolderKeys, setTemporaryFolderKeys] = useState<string[]>([]);
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => readStoredList("zdocs:open-tabs"));
+  const [closedTabIds, setClosedTabIds] = useState<string[]>([]);
   const [quickOpen, setQuickOpen] = useState(false);
   const [navigation, setNavigation] = useState<{ ids: string[]; index: number }>({ ids: [], index: -1 });
   const [trashedEntry, setTrashedEntry] = useState<{ projectId: string; path: string; trashPath: string }>();
@@ -222,7 +223,9 @@ export default function App() {
     if (activeDoc && targets.has(activeDoc.id) && source !== savedSource) { setNotice("请先保存当前文档再关闭标签"); return; }
     setOpenTabIds((current) => {
       const index = activeDoc ? current.indexOf(activeDoc.id) : -1;
+      const closed = current.filter((item) => targets.has(item));
       const next = current.filter((item) => !targets.has(item));
+      if (closed.length) setClosedTabIds((history) => [...history, ...closed].slice(-30));
       if (activeDoc && targets.has(activeDoc.id)) {
         const nextId = next[Math.min(index, next.length - 1)];
         const nextDoc = projects.flatMap((project) => project.files).find((doc) => doc.id === nextId);
@@ -235,6 +238,29 @@ export default function App() {
 
   function closeTab(id: string) {
     closeTabs([id]);
+  }
+
+  async function reloadActiveDoc() {
+    if (!activeDoc) return;
+    if (source !== savedSource) { setNotice("当前文档有未保存修改，保存后才能重新载入"); return; }
+    await performOpenDoc(activeDoc, false);
+    setNotice("已重新载入当前文档");
+    window.setTimeout(() => setNotice(undefined), 1400);
+  }
+
+  function switchTab(offset: number) {
+    if (!openDocs.length || !activeDoc || source !== savedSource) return;
+    const index = openDocs.findIndex((item) => item.id === activeDoc.id);
+    const next = openDocs[(index + offset + openDocs.length) % openDocs.length];
+    if (next && next.id !== activeDoc.id) void performOpenDoc(next);
+  }
+
+  function reopenClosedTab() {
+    const id = [...closedTabIds].reverse().find((item) => !openTabIds.includes(item));
+    const reopened = projects.flatMap((project) => project.files).find((item) => item.id === id);
+    if (!reopened) { setNotice("没有可恢复的标签页"); return; }
+    setClosedTabIds((history) => { const next = [...history]; next.splice(next.lastIndexOf(reopened.id), 1); return next; });
+    openDoc(reopened);
   }
 
   function requestRemoveProject(id: string) {
@@ -585,13 +611,28 @@ export default function App() {
 
   useEffect(() => {
     const handleNavigationShortcut = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || (event.key !== "[" && event.key !== "]")) return;
-      event.preventDefault();
-      navigateHistory(event.key === "[" ? -1 : 1);
+      const key = event.key.toLowerCase();
+      if (event.metaKey && !event.ctrlKey) {
+        if (key === "r") { event.preventDefault(); void reloadActiveDoc(); return; }
+        if (key === "w") { event.preventDefault(); if (activeDoc) closeTab(activeDoc.id); return; }
+        if (key === "t") { event.preventDefault(); if (event.shiftKey) reopenClosedTab(); else setQuickOpen(true); return; }
+        if (key === "l") { event.preventDefault(); setQuickOpen(true); return; }
+        if (/^[1-9]$/.test(key) && !event.shiftKey && !event.altKey) {
+          event.preventDefault();
+          const index = key === "9" ? openDocs.length - 1 : Number(key) - 1;
+          const target = openDocs[index];
+          if (target) openDoc(target);
+          return;
+        }
+        if ((key === "[" || key === "]") && event.shiftKey) { event.preventDefault(); switchTab(key === "[" ? -1 : 1); return; }
+        if ((event.altKey && (key === "arrowleft" || key === "arrowright"))) { event.preventDefault(); switchTab(key === "arrowleft" ? -1 : 1); return; }
+        if ((key === "[" || key === "]") && !event.shiftKey) { event.preventDefault(); navigateHistory(key === "[" ? -1 : 1); }
+      }
+      if (event.ctrlKey && !event.metaKey && key === "tab") { event.preventDefault(); switchTab(event.shiftKey ? -1 : 1); }
     };
     window.addEventListener("keydown", handleNavigationShortcut);
     return () => window.removeEventListener("keydown", handleNavigationShortcut);
-  }, [navigation, projects, source, savedSource]);
+  }, [navigation, projects, source, savedSource, activeDoc, openDocs, closedTabIds, openTabIds]);
 
   return (
     <div className={`app-shell theme-${theme}`}>
@@ -650,7 +691,7 @@ export default function App() {
         { label: "取消", onClick: () => setDialog(undefined) },
         { label: "确认删除", variant: "danger", onClick: () => void submitDeleteEntry(dialog.projectId, dialog.path, dialog.entryType) },
       ]} />}
-      {dialog?.kind === "shortcuts" && <Dialog title="快捷键" description={<div className="shortcut-list"><span>快速打开文档 <kbd>⌘ P</kbd></span><span>全局搜索 <kbd>⌘ K</kbd></span><span>后退 / 前进 <kbd>⌘ [ / ⌘ ]</kbd></span><span>添加项目 <kbd>⌘ O</kbd></span><span>保存文档 <kbd>⌘ S</kbd></span><span>关闭弹窗 <kbd>Esc</kbd></span><span>编辑器查找 <kbd>⌘ F</kbd></span></div>} onClose={() => setDialog(undefined)} actions={[{ label: "知道了", variant: "primary", onClick: () => setDialog(undefined) }]} />}
+      {dialog?.kind === "shortcuts" && <Dialog title="快捷键" description={<div className="shortcut-list"><span>快速打开文档 <kbd>⌘ T / ⌘ P</kbd></span><span>全局搜索 <kbd>⌘ K</kbd></span><span>重新载入当前文档 <kbd>⌘ R</kbd></span><span>关闭当前标签页 <kbd>⌘ W</kbd></span><span>恢复关闭的标签页 <kbd>⌘ ⇧ T</kbd></span><span>切换指定标签页 <kbd>⌘ 1…9</kbd></span><span>上一个 / 下一个标签页 <kbd>⌃ ⇧ Tab / ⌃ Tab</kbd></span><span>后退 / 前进 <kbd>⌘ [ / ⌘ ]</kbd></span><span>添加项目 <kbd>⌘ O</kbd></span><span>保存文档 <kbd>⌘ S</kbd></span><span>编辑器查找 <kbd>⌘ F</kbd></span><span>关闭弹窗 <kbd>Esc</kbd></span></div>} onClose={() => setDialog(undefined)} actions={[{ label: "知道了", variant: "primary", onClick: () => setDialog(undefined) }]} />}
       {larkOpen && <LarkDialog projects={projects} activeDoc={activeDoc} source={source} binding={activeDoc ? larkBindings[activeDoc.id] : undefined} onClose={() => setLarkOpen(false)} onImported={importFromLark} onPublished={bindPublishedDocument} />}
     </div>
   );

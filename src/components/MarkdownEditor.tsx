@@ -69,17 +69,8 @@ export default function MarkdownEditor({ docId, value, onChange, theme, onScroll
       void onPasteImage(image).then((path) => view.dispatch({ changes: { from: position, insert: `![${image.name || "粘贴图片"}](${path})` } }));
       return true;
     } });
-    const horizontalTrackpad = EditorView.domEventHandlers({ wheel(event, view) {
-      if (Math.abs(event.deltaX) < 1 || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return false;
-      const scroller = view.scrollDOM;
-      const before = scroller.scrollLeft;
-      scroller.scrollLeft += event.deltaX;
-      if (scroller.scrollLeft === before) return false;
-      event.preventDefault();
-      return true;
-    } });
-    return [autocompletion({ override: [complete] }), paste, horizontalTrackpad];
+    return [autocompletion({ override: [complete] }), paste];
   }, [pathSuggestions, headingSuggestions, onPasteImage]);
-  const extensions = theme === "dark" ? [markdown(), ...smartExtensions] : [markdown(), lightEditorTheme, syntaxHighlighting(markdownHighlight), ...smartExtensions];
+  const extensions = theme === "dark" ? [markdown(), EditorView.lineWrapping, ...smartExtensions] : [markdown(), EditorView.lineWrapping, lightEditorTheme, syntaxHighlighting(markdownHighlight), ...smartExtensions];
   return <CodeMirror value={value} height="100%" extensions={extensions} theme={theme === "dark" ? oneDark : undefined} onCreateEditor={(view) => { editor.current = view; requestAnimationFrame(() => { const max = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight; view.scrollDOM.scrollTop = max * initialScrollRatio; const cursor = Math.min(Number(localStorage.getItem(`zdocs:cursor:${docId}`)) || 0, view.state.doc.length); view.dispatch({ selection: { anchor: cursor }, scrollIntoView: initialScrollRatio === 0 }); }); }} onChange={onChange} onUpdate={(update) => { localStorage.setItem(`zdocs:cursor:${docId}`, String(update.state.selection.main.head)); const scroller = update.view.scrollDOM; const max = scroller.scrollHeight - scroller.clientHeight; if (max > 0) onScrollRatio(scroller.scrollTop / max); }} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, bracketMatching: true, closeBrackets: true, autocompletion: false, searchKeymap: true, highlightSelectionMatches: true }} />;
 }
