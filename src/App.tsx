@@ -5,7 +5,8 @@ import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
-import { copyAbsolutePath, createProjectDoc, downloadUpdate, exportDocument, hasReadPermission, isDesktop, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, requestReadPermission, revealInFinder, supportsDirectoryPicker, writeDoc, writePdfFile } from "./file-system";
+import { QuickOpen } from "./components/QuickOpen";
+import { copyAbsolutePath, createProjectDoc, createProjectEntry, downloadUpdate, exportDocument, hasReadPermission, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeDoc, writePdfFile } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -16,6 +17,9 @@ type PendingDialog =
   | { kind: "remove"; projectId: string; projectName: string }
   | { kind: "conflict"; diskContent: string; diskModified: number }
   | { kind: "rename"; doc: DocFile }
+  | { kind: "create"; projectId: string; folderPath: string; entryType: "file" | "folder" }
+  | { kind: "delete-entry"; projectId: string; path: string; name: string; entryType: "file" | "folder" }
+  | { kind: "rename-folder"; projectId: string; path: string; name: string }
   | { kind: "shortcuts" };
 type UpdateInfo = { version: string; url: string; fileName: string };
 
@@ -41,6 +45,12 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem("zdocs:sidebar-width")) || 276);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("zdocs:sidebar-collapsed") === "true");
   const [renameValue, setRenameValue] = useState("");
+  const [createValue, setCreateValue] = useState("");
+  const [temporaryFolderKeys, setTemporaryFolderKeys] = useState<string[]>([]);
+  const [openTabIds, setOpenTabIds] = useState<string[]>(() => readStoredList("zdocs:open-tabs"));
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [navigation, setNavigation] = useState<{ ids: string[]; index: number }>({ ids: [], index: -1 });
+  const [trashedEntry, setTrashedEntry] = useState<{ projectId: string; path: string; trashPath: string }>();
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo>();
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
@@ -51,6 +61,7 @@ export default function App() {
   useEffect(() => localStorage.setItem("zdocs:favorites", JSON.stringify(favoriteIds)), [favoriteIds]);
   useEffect(() => localStorage.setItem("zdocs:recent", JSON.stringify(recentIds)), [recentIds]);
   useEffect(() => localStorage.setItem("zdocs:theme", theme), [theme]);
+  useEffect(() => localStorage.setItem("zdocs:open-tabs", JSON.stringify(openTabIds)), [openTabIds]);
   useEffect(() => saveLarkBindings(larkBindings), [larkBindings]);
   useEffect(() => {
     if (!isDesktop()) return;
@@ -114,6 +125,10 @@ export default function App() {
         event.preventDefault();
         document.querySelector<HTMLInputElement>(".search-box input")?.focus();
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setQuickOpen(true);
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         document.querySelector<HTMLButtonElement>(".save-button.dirty")?.click();
@@ -161,13 +176,21 @@ export default function App() {
     }
   }
 
-  async function performOpenDoc(doc: DocFile) {
+  async function performOpenDoc(doc: DocFile, recordNavigation = true) {
     try {
       const snapshot = await readDoc(doc);
       setSource(snapshot.content);
       setSavedSource(snapshot.content);
       setLoadedLastModified(snapshot.lastModified);
       setActiveDoc(doc);
+      const storedMode = localStorage.getItem(`zdocs:view-mode:${doc.id}`) as ViewMode | null;
+      if (storedMode === "source" || storedMode === "preview" || storedMode === "split") setMode(storedMode);
+      setOpenTabIds((current) => current.includes(doc.id) ? current : [...current, doc.id]);
+      if (recordNavigation) setNavigation((current) => {
+        if (current.ids[current.index] === doc.id) return current;
+        const ids = [...current.ids.slice(0, current.index + 1), doc.id].slice(-80);
+        return { ids, index: ids.length - 1 };
+      });
       setRecentIds((current) => [doc.id, ...current.filter((id) => id !== doc.id)].slice(0, 20));
       localStorage.setItem("zdocs:last-doc", doc.id);
       setNotice(undefined);
@@ -183,6 +206,35 @@ export default function App() {
       return;
     }
     void performOpenDoc(doc);
+  }
+
+  function navigateHistory(direction: -1 | 1) {
+    const nextIndex = navigation.index + direction;
+    const id = navigation.ids[nextIndex];
+    const doc = projects.flatMap((project) => project.files).find((item) => item.id === id);
+    if (!doc || source !== savedSource) return;
+    setNavigation((current) => ({ ...current, index: nextIndex }));
+    void performOpenDoc(doc, false);
+  }
+
+  function closeTabs(ids: string[]) {
+    const targets = new Set(ids);
+    if (activeDoc && targets.has(activeDoc.id) && source !== savedSource) { setNotice("请先保存当前文档再关闭标签"); return; }
+    setOpenTabIds((current) => {
+      const index = activeDoc ? current.indexOf(activeDoc.id) : -1;
+      const next = current.filter((item) => !targets.has(item));
+      if (activeDoc && targets.has(activeDoc.id)) {
+        const nextId = next[Math.min(index, next.length - 1)];
+        const nextDoc = projects.flatMap((project) => project.files).find((doc) => doc.id === nextId);
+        if (nextDoc) void performOpenDoc(nextDoc);
+        else { setActiveDoc(undefined); setSource(""); setSavedSource(""); localStorage.removeItem("zdocs:last-doc"); }
+      }
+      return next;
+    });
+  }
+
+  function closeTab(id: string) {
+    closeTabs([id]);
   }
 
   function requestRemoveProject(id: string) {
@@ -256,6 +308,11 @@ export default function App() {
     setFavoriteIds((current) => current.includes(activeDoc.id) ? current.filter((id) => id !== activeDoc.id) : [activeDoc.id, ...current]);
   }
 
+  function changeViewMode(nextMode: ViewMode) {
+    setMode(nextMode);
+    if (activeDoc) localStorage.setItem(`zdocs:view-mode:${activeDoc.id}`, nextMode);
+  }
+
   async function importFromLark(projectId: string, path: string, content: string, binding: LarkBinding) {
     const project = projects.find((item) => item.id === projectId);
     if (!project) throw new Error("目标项目不存在或需要重新授权");
@@ -316,6 +373,8 @@ export default function App() {
   }
 
   const activeProject = projects.find((project) => project.id === activeDoc?.projectId);
+  const allDocs = projects.flatMap((project) => project.files);
+  const openDocs = openTabIds.map((id) => allDocs.find((doc) => doc.id === id)).filter((doc): doc is DocFile => Boolean(doc));
 
   function reorderProjects(draggedId: string, targetId: string, position: "before" | "after") {
     if (draggedId === targetId) return;
@@ -391,7 +450,8 @@ export default function App() {
     }
   }
 
-  function handleDocAction(action: "reveal" | "copy-path" | "rename" | "export-pdf" | "export-docx", doc: DocFile) {
+  function handleDocAction(action: "reveal" | "copy-path" | "rename" | "export-pdf" | "export-docx" | "delete", doc: DocFile) {
+    if (action === "delete") { setDialog({ kind: "delete-entry", projectId: doc.projectId, path: doc.path, name: doc.name, entryType: "file" }); return; }
     if (action === "export-pdf" || action === "export-docx") { requestExport(doc, action === "export-pdf" ? "pdf" : "docx"); return; }
     if (action === "rename") { setRenameValue(doc.name); setDialog({ kind: "rename", doc }); return; }
     void (async () => {
@@ -400,6 +460,109 @@ export default function App() {
         else { await copyAbsolutePath(doc); setNotice(`绝对路径已复制：${doc.nativePath}`); window.setTimeout(() => setNotice(undefined), 2600); }
       } catch (error) { setNotice(error instanceof Error ? error.message : "操作失败"); }
     })();
+  }
+
+  async function submitDeleteEntry(projectId: string, path: string, entryType: "file" | "folder") {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    try {
+      const trashPath = await trashProjectEntry(project, path, entryType);
+      const removesActive = activeDoc?.projectId === projectId && (entryType === "file" ? activeDoc.path === path : activeDoc.path.startsWith(`${path}/`));
+      const refreshed = await refreshProject(project);
+      setProjects((current) => current.map((item) => item.id === project.id ? refreshed : item));
+      if (removesActive) { setActiveDoc(undefined); setSource(""); setSavedSource(""); localStorage.removeItem("zdocs:last-doc"); }
+      setFavoriteIds((current) => current.filter((id) => refreshed.files.some((doc) => doc.id === id)));
+      setRecentIds((current) => current.filter((id) => refreshed.files.some((doc) => doc.id === id)));
+      if (entryType === "folder") setTemporaryFolderKeys((current) => current.filter((key) => key !== `${projectId}:${path}` && !key.startsWith(`${projectId}:${path}/`)));
+      setDialog(undefined);
+      if (trashPath) setTrashedEntry({ projectId, path, trashPath });
+      setNotice(entryType === "file" ? "文档已移入废纸篓" : "文件夹已移入废纸篓");
+      window.setTimeout(() => { setNotice(undefined); setTrashedEntry(undefined); }, 6500);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "删除失败"); }
+  }
+
+  async function undoTrash() {
+    if (!trashedEntry) return;
+    const project = projects.find((item) => item.id === trashedEntry.projectId);
+    if (!project) return;
+    try {
+      await restoreTrashedEntry(project, trashedEntry.path, trashedEntry.trashPath);
+      const refreshed = await refreshProject(project);
+      setProjects((current) => current.map((item) => item.id === project.id ? refreshed : item));
+      setTrashedEntry(undefined);
+      setNotice("已恢复到原位置");
+      window.setTimeout(() => setNotice(undefined), 1800);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "恢复失败"); }
+  }
+
+  async function moveEntry(projectId: string, sourcePath: string, targetFolder: string) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project || sourcePath.split("/").slice(0, -1).join("/") === targetFolder) return;
+    try {
+      const movedPath = await moveProjectEntry(project, sourcePath, targetFolder);
+      const oldPrefix = `${projectId}:${sourcePath}`;
+      const newPrefix = `${projectId}:${movedPath}`;
+      const remapId = (id: string) => id === oldPrefix || id.startsWith(`${oldPrefix}/`) ? `${newPrefix}${id.slice(oldPrefix.length)}` : id;
+      const activePath = activeDoc?.projectId === projectId && (activeDoc.path === sourcePath || activeDoc.path.startsWith(`${sourcePath}/`)) ? `${movedPath}${activeDoc.path.slice(sourcePath.length)}` : undefined;
+      const refreshed = await refreshProject(project);
+      setProjects((current) => current.map((item) => item.id === projectId ? refreshed : item));
+      setFavoriteIds((current) => current.map(remapId));
+      setRecentIds((current) => current.map(remapId));
+      setOpenTabIds((current) => current.map(remapId));
+      if (activePath) {
+        const movedDoc = refreshed.files.find((doc) => doc.path === activePath);
+        if (movedDoc) { setActiveDoc(movedDoc); localStorage.setItem("zdocs:last-doc", movedDoc.id); }
+      }
+      setNotice(`已移动到 ${targetFolder || project.name}`);
+      window.setTimeout(() => setNotice(undefined), 1800);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "移动失败"); }
+  }
+
+  async function submitRenameFolder(projectId: string, path: string) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project || !renameValue.trim()) return;
+    try {
+      const renamedPath = await renameProjectFolder(project, path, renameValue);
+      const oldPrefix = `${projectId}:${path}`;
+      const newPrefix = `${projectId}:${renamedPath}`;
+      const remapId = (id: string) => id === oldPrefix || id.startsWith(`${oldPrefix}/`) ? `${newPrefix}${id.slice(oldPrefix.length)}` : id;
+      const activePath = activeDoc?.projectId === projectId && activeDoc.path.startsWith(`${path}/`) ? `${renamedPath}${activeDoc.path.slice(path.length)}` : undefined;
+      const refreshed = await refreshProject(project);
+      setProjects((current) => current.map((item) => item.id === projectId ? refreshed : item));
+      setFavoriteIds((current) => current.map(remapId));
+      setRecentIds((current) => current.map(remapId));
+      setTemporaryFolderKeys((current) => current.map((key) => key === oldPrefix || key.startsWith(`${oldPrefix}/`) ? `${newPrefix}${key.slice(oldPrefix.length)}` : key));
+      if (activePath) {
+        const renamedDoc = refreshed.files.find((doc) => doc.path === activePath);
+        if (renamedDoc) { setActiveDoc(renamedDoc); localStorage.setItem("zdocs:last-doc", renamedDoc.id); }
+      }
+      setDialog(undefined);
+      setNotice(`文件夹已重命名为“${renameValue.trim()}”`);
+      window.setTimeout(() => setNotice(undefined), 2200);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "文件夹重命名失败"); }
+  }
+
+  function requestCreateEntry(projectId: string, folderPath: string, entryType: "file" | "folder") {
+    setCreateValue("");
+    setDialog({ kind: "create", projectId, folderPath, entryType });
+  }
+
+  async function submitCreateEntry(projectId: string, folderPath: string, entryType: "file" | "folder") {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project || !createValue.trim()) return;
+    try {
+      const createdPath = await createProjectEntry(project, folderPath, createValue, entryType);
+      const refreshed = await refreshProject(project);
+      setProjects((current) => current.map((item) => item.id === project.id ? refreshed : item));
+      setDialog(undefined);
+      if (entryType === "folder") setTemporaryFolderKeys((current) => [...new Set([...current, `${projectId}:${createdPath}`])]);
+      if (entryType === "file" && source === savedSource) {
+        const created = refreshed.files.find((item) => item.path === createdPath);
+        if (created) await performOpenDoc(created);
+      }
+      setNotice(entryType === "file" ? `已创建 ${createdPath}` : `已创建文件夹 ${createdPath}`);
+      window.setTimeout(() => setNotice(undefined), 2200);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "创建失败"); }
   }
 
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -420,9 +583,19 @@ export default function App() {
     document.body.classList.remove("is-resizing");
   }
 
+  useEffect(() => {
+    const handleNavigationShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || (event.key !== "[" && event.key !== "]")) return;
+      event.preventDefault();
+      navigateHistory(event.key === "[" ? -1 : 1);
+    };
+    window.addEventListener("keydown", handleNavigationShortcut);
+    return () => window.removeEventListener("keydown", handleNavigationShortcut);
+  }, [navigation, projects, source, savedSource]);
+
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
@@ -442,9 +615,10 @@ export default function App() {
           if (event.key === "ArrowRight") setSidebarWidth((value) => Math.min(520, value + 10));
         }}
       />
-      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={setMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} theme={theme} />
+      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} />
+      {quickOpen && <QuickOpen projects={projects} onOpen={openDoc} onClose={() => setQuickOpen(false)} />}
       {availableUpdate && <div className="update-banner" role="status"><span><strong>发现新版本 v{availableUpdate.version}</strong><small>已发布到 GitHub</small></span><button type="button" disabled={isDownloadingUpdate} onClick={() => { setIsDownloadingUpdate(true); setNotice("正在下载更新包…"); void downloadUpdate(availableUpdate.url, availableUpdate.fileName).then((path) => { setNotice(`更新包已下载并打开：${path}`); }).catch((error) => setNotice(error instanceof Error ? error.message : "更新下载失败")).finally(() => setIsDownloadingUpdate(false)); }}>{isDownloadingUpdate ? "下载中…" : "下载更新"}</button><button className="update-dismiss" type="button" aria-label="暂不更新" onClick={() => { localStorage.setItem("zdocs:dismissed-update", availableUpdate.version); setAvailableUpdate(undefined); }}>×</button></div>}
-      {notice && <div className="toast" role="alert"><span>{notice}</span><button type="button" onClick={() => setNotice(undefined)}>×</button></div>}
+      {notice && <div className="toast" role="alert"><span>{notice}</span>{trashedEntry && <button className="toast-action" type="button" onClick={() => void undoTrash()}>撤销</button>}<button type="button" onClick={() => { setNotice(undefined); setTrashedEntry(undefined); }}>×</button></div>}
       {!supportsDirectoryPicker() && !isDesktop() && <div className="browser-warning">请使用 Chrome 或 Edge 打开，以授权读取本地项目目录。</div>}
       {dialog?.kind === "unsaved" && <Dialog title="文档尚未保存" description="继续操作前，要保存当前修改吗？" onClose={() => setDialog(undefined)} actions={[
         { label: "取消", onClick: () => setDialog(undefined) },
@@ -464,7 +638,19 @@ export default function App() {
         { label: "取消", onClick: () => setDialog(undefined) },
         { label: "确认重命名", variant: "primary", onClick: () => void submitRename(dialog.doc) },
       ]} />}
-      {dialog?.kind === "shortcuts" && <Dialog title="快捷键" description={<div className="shortcut-list"><span>全局搜索 <kbd>⌘ K</kbd></span><span>添加项目 <kbd>⌘ O</kbd></span><span>保存文档 <kbd>⌘ S</kbd></span><span>关闭弹窗 <kbd>Esc</kbd></span><span>编辑器查找 <kbd>⌘ F</kbd></span></div>} onClose={() => setDialog(undefined)} actions={[{ label: "知道了", variant: "primary", onClick: () => setDialog(undefined) }]} />}
+      {dialog?.kind === "rename-folder" && <Dialog title="重命名文件夹" description={<label className="rename-field"><span>文件夹名称</span><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Enter" && renameValue.trim()) void submitRenameFolder(dialog.projectId, dialog.path); }} /></label>} onClose={() => setDialog(undefined)} actions={[
+        { label: "取消", onClick: () => setDialog(undefined) },
+        { label: "确认重命名", variant: "primary", onClick: () => void submitRenameFolder(dialog.projectId, dialog.path) },
+      ]} />}
+      {dialog?.kind === "create" && <Dialog title={dialog.entryType === "file" ? "新建 Markdown" : "新建文件夹"} description={<label className="rename-field"><span>{dialog.folderPath || "项目根目录"}</span><input autoFocus value={createValue} placeholder={dialog.entryType === "file" ? "例如：接口说明.md" : "例如：设计文档"} onChange={(event) => setCreateValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && createValue.trim()) void submitCreateEntry(dialog.projectId, dialog.folderPath, dialog.entryType); }} /></label>} onClose={() => setDialog(undefined)} actions={[
+        { label: "取消", onClick: () => setDialog(undefined) },
+        { label: "创建", variant: "primary", onClick: () => void submitCreateEntry(dialog.projectId, dialog.folderPath, dialog.entryType) },
+      ]} />}
+      {dialog?.kind === "delete-entry" && <Dialog title={dialog.entryType === "file" ? "将文档移入废纸篓？" : "将文件夹移入废纸篓？"} description={dialog.entryType === "file" ? <>文档“<strong>{dialog.name}</strong>”将移入 macOS 废纸篓，操作完成后可立即撤销。</> : <>文件夹“<strong>{dialog.name}</strong>”及其中所有内容将移入 macOS 废纸篓，操作完成后可立即撤销。</>} onClose={() => setDialog(undefined)} actions={[
+        { label: "取消", onClick: () => setDialog(undefined) },
+        { label: "确认删除", variant: "danger", onClick: () => void submitDeleteEntry(dialog.projectId, dialog.path, dialog.entryType) },
+      ]} />}
+      {dialog?.kind === "shortcuts" && <Dialog title="快捷键" description={<div className="shortcut-list"><span>快速打开文档 <kbd>⌘ P</kbd></span><span>全局搜索 <kbd>⌘ K</kbd></span><span>后退 / 前进 <kbd>⌘ [ / ⌘ ]</kbd></span><span>添加项目 <kbd>⌘ O</kbd></span><span>保存文档 <kbd>⌘ S</kbd></span><span>关闭弹窗 <kbd>Esc</kbd></span><span>编辑器查找 <kbd>⌘ F</kbd></span></div>} onClose={() => setDialog(undefined)} actions={[{ label: "知道了", variant: "primary", onClick: () => setDialog(undefined) }]} />}
       {larkOpen && <LarkDialog projects={projects} activeDoc={activeDoc} source={source} binding={activeDoc ? larkBindings[activeDoc.id] : undefined} onClose={() => setLarkOpen(false)} onImported={importFromLark} onPublished={bindPublishedDocument} />}
     </div>
   );

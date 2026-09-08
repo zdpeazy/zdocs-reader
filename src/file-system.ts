@@ -25,10 +25,8 @@ async function scanDirectory(
     const path = prefix ? `${prefix}/${name}` : name;
     if (handle.kind === "directory") {
       const child = await scanDirectory(handle, projectId, path);
-      if (child.tree.length) {
-        tree.push({ type: "folder", name, path, children: child.tree });
-        files.push(...child.files);
-      }
+      tree.push({ type: "folder", name, path, children: child.tree });
+      files.push(...child.files);
     } else if (name.toLowerCase().endsWith(".md")) {
       const doc: DocFile = {
         id: `${projectId}:${path}`,
@@ -183,6 +181,11 @@ export function renameMarkdown(doc: DocFile, newName: string) {
   return invoke<string>("rename_markdown", { path: doc.nativePath, newName });
 }
 
+export function renameProjectFolder(project: DocsProject, folderPath: string, newName: string) {
+  if (!project.rootPath) throw new Error("文件夹重命名目前仅支持桌面端");
+  return invoke<string>("rename_project_folder", { rootPath: project.rootPath, folderPath, newName });
+}
+
 export function exportDocument(outputPath: string, format: "pdf" | "docx", title: string, html: string) {
   return invoke<string>("export_document", { outputPath, format, title, html });
 }
@@ -200,4 +203,80 @@ export function openExternalLink(url: string) {
 export function downloadUpdate(url: string, fileName: string) {
   if (!isDesktop()) throw new Error("自动下载更新仅支持桌面端");
   return invoke<string>("download_update", { url, fileName });
+}
+
+export async function createProjectEntry(project: DocsProject, folderPath: string, name: string, kind: "file" | "folder") {
+  const cleanName = name.trim();
+  if (!cleanName || cleanName === "." || cleanName === ".." || /[/\\]/.test(cleanName)) throw new Error("名称无效，请勿包含路径分隔符");
+  if (project.rootPath) return invoke<string>("create_project_entry", { rootPath: project.rootPath, folderPath, name: cleanName, kind });
+  if (!project.rootHandle) throw new Error("项目目录不可用");
+  let directory = project.rootHandle;
+  for (const part of folderPath.split("/").filter(Boolean)) directory = await directory.getDirectoryHandle(part);
+  if (kind === "folder") {
+    try { await directory.getDirectoryHandle(cleanName); throw new Error("同名文件夹已经存在"); } catch (error) { if (error instanceof Error && error.message === "同名文件夹已经存在") throw error; }
+    await directory.getDirectoryHandle(cleanName, { create: true });
+  }
+  else {
+    const fileName = cleanName.toLowerCase().endsWith(".md") ? cleanName : `${cleanName}.md`;
+    try { await directory.getFileHandle(fileName); throw new Error("同名文件已经存在"); } catch (error) { if (error instanceof Error && error.message === "同名文件已经存在") throw error; }
+    await directory.getFileHandle(fileName, { create: true });
+    return folderPath ? `${folderPath}/${fileName}` : fileName;
+  }
+  return folderPath ? `${folderPath}/${cleanName}` : cleanName;
+}
+
+export async function deleteProjectEntry(project: DocsProject, relativePath: string, kind: "file" | "folder") {
+  if (!relativePath.trim()) throw new Error("不能删除项目根目录");
+  if (project.rootPath) return invoke<void>("delete_project_entry", { rootPath: project.rootPath, relativePath, kind });
+  if (!project.rootHandle) throw new Error("项目目录不可用");
+  const parts = relativePath.split("/").filter(Boolean);
+  const name = parts.pop();
+  if (!name) throw new Error("目标路径无效");
+  let directory = project.rootHandle;
+  for (const part of parts) directory = await directory.getDirectoryHandle(part);
+  await directory.removeEntry(name, { recursive: kind === "folder" });
+}
+
+export function moveProjectEntry(project: DocsProject, sourcePath: string, targetFolder: string) {
+  if (!project.rootPath) throw new Error("拖动移动目前仅支持桌面端");
+  return invoke<string>("move_project_entry", { rootPath: project.rootPath, sourcePath, targetFolder });
+}
+
+export async function trashProjectEntry(project: DocsProject, relativePath: string, kind: "file" | "folder") {
+  if (project.rootPath) return invoke<string>("trash_project_entry", { rootPath: project.rootPath, relativePath });
+  await deleteProjectEntry(project, relativePath, kind);
+  return undefined;
+}
+
+export function restoreTrashedEntry(project: DocsProject, relativePath: string, trashPath: string) {
+  if (!project.rootPath) throw new Error("撤销删除仅支持桌面端");
+  return invoke<void>("restore_trashed_entry", { rootPath: project.rootPath, relativePath, trashPath });
+}
+
+export async function savePastedImage(project: DocsProject, doc: DocFile, file: File) {
+  const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") || file.name.split(".").pop() || "png";
+  const originalName = file.name && file.name !== "image.png" ? file.name : `image-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
+  if (project.rootPath) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    return invoke<string>("save_pasted_image", { rootPath: project.rootPath, documentPath: doc.path, fileName: originalName, base64Data: btoa(binary) });
+  }
+  if (!project.rootHandle) throw new Error("项目目录不可用");
+  const parts = doc.path.split("/").slice(0, -1);
+  let directory = project.rootHandle;
+  for (const part of parts) directory = await directory.getDirectoryHandle(part);
+  const assets = await directory.getDirectoryHandle("assets", { create: true });
+  const dot = originalName.lastIndexOf(".");
+  const stem = dot > 0 ? originalName.slice(0, dot) : originalName;
+  const suffix = dot > 0 ? originalName.slice(dot) : `.${extension}`;
+  let finalName = `${stem}${suffix}`;
+  for (let index = 1; ; index += 1) {
+    try { await assets.getFileHandle(finalName); finalName = `${stem}-${index}${suffix}`; } catch { break; }
+  }
+  const handle = await assets.getFileHandle(finalName, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(file);
+  await writable.close();
+  return `assets/${finalName}`;
 }

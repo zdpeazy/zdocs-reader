@@ -55,7 +55,7 @@ fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<Nativ
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/");
         if path.is_dir() {
             let children = scan_dir(root, &path, project_id, files)?;
-            if !children.is_empty() { nodes.push(TreeNode::Folder { name, path: relative, children }); }
+            nodes.push(TreeNode::Folder { name, path: relative, children });
         } else if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("md")) {
             let doc = NativeDoc { id: format!("{}:{}", project_id, relative), name: name.clone(), path: relative.clone(), project_id: project_id.to_string(), native_path: path.to_string_lossy().to_string() };
             files.push(doc.clone());
@@ -109,6 +109,114 @@ fn create_markdown(root_path: String, relative_path: String, content: String) ->
     while target.exists() { target = parent.join(format!("{} ({}).{}", stem, index, extension)); index += 1; }
     fs::write(&target, content).map_err(|error| error.to_string())?;
     Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
+}
+
+#[tauri::command]
+fn create_project_entry(root_path: String, folder_path: String, name: String, kind: String) -> Result<String, String> {
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let clean_name = name.trim();
+    if clean_name.is_empty() || clean_name == "." || clean_name == ".." || clean_name.contains('/') || clean_name.contains('\\') {
+        return Err("名称无效，请勿包含路径分隔符".into());
+    }
+    let parent = root.join(&folder_path).canonicalize().map_err(|error| error.to_string())?;
+    if !parent.starts_with(&root) { return Err("目标目录超出项目范围".into()); }
+    let final_name = if kind == "file" && !clean_name.to_lowercase().ends_with(".md") { format!("{}.md", clean_name) } else { clean_name.to_string() };
+    let target = parent.join(&final_name);
+    if target.exists() { return Err("同名文件或文件夹已经存在".into()); }
+    if kind == "folder" { fs::create_dir(&target).map_err(|error| error.to_string())?; }
+    else if kind == "file" { fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|error| error.to_string())?; }
+    else { return Err("不支持的创建类型".into()); }
+    Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
+}
+
+#[tauri::command]
+fn delete_project_entry(root_path: String, relative_path: String, kind: String) -> Result<(), String> {
+    if relative_path.trim().is_empty() { return Err("不能删除项目根目录".into()); }
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let target = root.join(relative_path).canonicalize().map_err(|error| error.to_string())?;
+    if target == root || !target.starts_with(&root) { return Err("删除目标超出项目范围".into()); }
+    if kind == "folder" {
+        if !target.is_dir() { return Err("目标不是文件夹".into()); }
+        fs::remove_dir_all(target).map_err(|error| error.to_string())
+    } else if kind == "file" {
+        if !target.is_file() { return Err("目标不是文件".into()); }
+        fs::remove_file(target).map_err(|error| error.to_string())
+    } else {
+        Err("不支持的删除类型".into())
+    }
+}
+
+#[tauri::command]
+fn rename_project_folder(root_path: String, folder_path: String, new_name: String) -> Result<String, String> {
+    let clean_name = new_name.trim();
+    if clean_name.is_empty() || clean_name == "." || clean_name == ".." || clean_name.contains('/') || clean_name.contains('\\') { return Err("文件夹名称无效，请勿包含路径分隔符".into()); }
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let source = root.join(&folder_path).canonicalize().map_err(|error| error.to_string())?;
+    if source == root || !source.starts_with(&root) || !source.is_dir() { return Err("无法重命名该文件夹".into()); }
+    let target = source.parent().ok_or("无法定位上级目录")?.join(clean_name);
+    if target.exists() && target != source { return Err("同名文件或文件夹已经存在".into()); }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
+}
+
+#[tauri::command]
+fn move_project_entry(root_path: String, source_path: String, target_folder: String) -> Result<String, String> {
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let source = root.join(&source_path).canonicalize().map_err(|error| error.to_string())?;
+    let destination = root.join(&target_folder).canonicalize().map_err(|error| error.to_string())?;
+    if source == root || !source.starts_with(&root) || !destination.starts_with(&root) || !destination.is_dir() { return Err("移动路径超出项目范围".into()); }
+    if source.is_dir() && destination.starts_with(&source) { return Err("不能将文件夹移动到自身内部".into()); }
+    let target = destination.join(source.file_name().ok_or("无法读取名称")?);
+    if target.exists() { return Err("目标文件夹中存在同名项目".into()); }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
+}
+
+#[tauri::command]
+fn trash_project_entry(root_path: String, relative_path: String) -> Result<String, String> {
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let source = root.join(&relative_path).canonicalize().map_err(|error| error.to_string())?;
+    if source == root || !source.starts_with(&root) { return Err("删除目标超出项目范围".into()); }
+    let trash = PathBuf::from(std::env::var("HOME").map_err(|_| "无法定位用户目录")?).join(".Trash");
+    fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
+    let name = source.file_name().and_then(|value| value.to_str()).ok_or("无法读取名称")?;
+    let mut target = trash.join(name);
+    let mut index = 1;
+    while target.exists() { target = trash.join(format!("{} {}", name, index)); index += 1; }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn restore_trashed_entry(root_path: String, relative_path: String, trash_path: String) -> Result<(), String> {
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let trash_root = PathBuf::from(std::env::var("HOME").map_err(|_| "无法定位用户目录")?).join(".Trash").canonicalize().map_err(|error| error.to_string())?;
+    let source = PathBuf::from(trash_path).canonicalize().map_err(|error| error.to_string())?;
+    if !source.starts_with(&trash_root) { return Err("恢复来源不是废纸篓".into()); }
+    let target = root.join(relative_path);
+    if target.exists() { return Err("原位置已存在同名项目".into()); }
+    let parent = target.parent().ok_or("无法定位原目录")?;
+    if !parent.exists() || !parent.canonicalize().map_err(|error| error.to_string())?.starts_with(&root) { return Err("原目录已经不存在".into()); }
+    fs::rename(source, target).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_pasted_image(root_path: String, document_path: String, file_name: String, base64_data: String) -> Result<String, String> {
+    let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
+    let document = root.join(document_path).canonicalize().map_err(|error| error.to_string())?;
+    if !document.starts_with(&root) || !document.is_file() { return Err("文档路径超出项目范围".into()); }
+    let assets = document.parent().ok_or("无法定位文档目录")?.join("assets");
+    fs::create_dir_all(&assets).map_err(|error| error.to_string())?;
+    let raw_name = PathBuf::from(file_name);
+    let stem = raw_name.file_stem().and_then(|value| value.to_str()).unwrap_or("image");
+    let extension = raw_name.extension().and_then(|value| value.to_str()).unwrap_or("png");
+    let safe_stem: String = stem.chars().map(|value| if value.is_alphanumeric() || value == '-' || value == '_' { value } else { '-' }).collect();
+    let mut target = assets.join(format!("{}.{}", safe_stem, extension));
+    let mut index = 1;
+    while target.exists() { target = assets.join(format!("{}-{}.{}", safe_stem, index, extension)); index += 1; }
+    let data = STANDARD.decode(base64_data).map_err(|error| format!("图片数据无效：{}", error))?;
+    fs::write(&target, data).map_err(|error| error.to_string())?;
+    Ok(format!("assets/{}", target.file_name().and_then(|value| value.to_str()).ok_or("图片名称无效")?))
 }
 
 #[tauri::command]
@@ -292,7 +400,7 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, download_update, open_external_link, lark_status, lark_import, lark_publish])
+        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, download_update, open_external_link, lark_status, lark_import, lark_publish])
         .run(tauri::generate_context!())
         .expect("error while running ZDocs");
 }
