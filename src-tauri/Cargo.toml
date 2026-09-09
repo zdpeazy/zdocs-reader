@@ -1,6 +1,6 @@
 [package]
 name = "zdocs-reader"
-version = "0.1.26"
+version = "0.1.28"
 description = "Local multi-project Markdown workspace"
 authors = ["ZDocs"]
 edition = "2021"

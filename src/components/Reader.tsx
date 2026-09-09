@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Eye, FileCode2, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Eye, FileCode2, FolderTree, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { forwardRef, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { copyText, getProjectFile, openExternalLink, readNativeAsset, resolveRelativePath, savePastedImage } from "../file-system";
@@ -21,6 +21,7 @@ interface ReaderProps {
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onOpenDoc: (doc: DocFile) => void;
+  onRevealInTree: (doc: DocFile) => void;
   theme?: "light" | "dark";
   openDocs: DocFile[];
   onCloseTab: (id: string) => void;
@@ -30,7 +31,7 @@ interface ReaderProps {
   onNavigate: (direction: -1 | 1) => void;
 }
 
-export function Reader({ doc, project, source, mode, onModeChange, onSourceChange, onSave, isDirty, isSaving, isFavorite, onToggleFavorite, onOpenDoc, theme = "light", openDocs, onCloseTab, onCloseTabs, canGoBack, canGoForward, onNavigate }: ReaderProps) {
+export function Reader({ doc, project, source, mode, onModeChange, onSourceChange, onSave, isDirty, isSaving, isFavorite, onToggleFavorite, onOpenDoc, onRevealInTree, theme = "light", openDocs, onCloseTab, onCloseTabs, canGoBack, canGoForward, onNavigate }: ReaderProps) {
   const rendered = useMemo(() => parseMarkdown(source), [source]);
   const [previewHtml, setPreviewHtml] = useState(rendered.html);
   const [splitRatio, setSplitRatio] = useState(() => Number(localStorage.getItem("zdocs:split-ratio")) || 50);
@@ -189,7 +190,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
 
   return (
     <main className={`reader-shell ${focusMode ? "focus-mode" : ""}`} style={{ "--reading-size": `${reading.fontSize}px`, "--reading-line": reading.lineHeight, "--reading-width": `${reading.width}px` } as React.CSSProperties}>
-      <div className="document-tabs">{openDocs.map((tab) => <button key={tab.id} type="button" className={tab.id === doc.id ? "active" : ""} onClick={() => onOpenDoc(tab)} onContextMenu={(event) => { event.preventDefault(); const width = 188; const height = 216; setTabMenu({ id: tab.id, x: Math.min(event.clientX, window.innerWidth - width - 8), y: Math.min(event.clientY, window.innerHeight - height - 8) }); }} title={tab.path}><FileCode2 size={13} /><span>{tab.name.replace(/\.md$/i, "")}</span>{tab.id === doc.id && isDirty && <i /> }<b role="button" aria-label={`关闭 ${tab.name}`} onClick={(event) => { event.stopPropagation(); onCloseTab(tab.id); }}><X size={12} /></b></button>)}</div>
+      <div className="document-tabs">{openDocs.map((tab) => <button key={tab.id} type="button" className={tab.id === doc.id ? "active" : ""} onClick={() => onOpenDoc(tab)} onContextMenu={(event) => { event.preventDefault(); const width = 188; const height = 258; setTabMenu({ id: tab.id, x: Math.min(event.clientX, window.innerWidth - width - 8), y: Math.min(event.clientY, window.innerHeight - height - 8) }); }} title={tab.path}><FileCode2 size={13} /><span>{tab.name.replace(/\.md$/i, "")}</span>{tab.id === doc.id && isDirty && <i /> }<b role="button" aria-label={`关闭 ${tab.name}`} onClick={(event) => { event.stopPropagation(); onCloseTab(tab.id); }}><X size={12} /></b></button>)}</div>
       <header className="topbar">
         <div className="history-actions"><button type="button" disabled={!canGoBack} onClick={() => onNavigate(-1)} title="后退 (⌘[)"><ArrowLeft size={15} /></button><button type="button" disabled={!canGoForward} onClick={() => onNavigate(1)} title="前进 (⌘])"><ArrowRight size={15} /></button></div>
         <div className="breadcrumbs"><span>{project.name}</span><b>/</b>{pathParts.map((part, index) => <span key={`${part}-${index}`} className={index === pathParts.length - 1 ? "current" : ""}>{part}{index < pathParts.length - 1 && <b>/</b>}</span>)}</div>
@@ -226,7 +227,8 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
           { label: "关闭其他标签页", ids: openDocs.filter((tab) => tab.id !== tabMenu.id).map((tab) => tab.id), disabled: openDocs.length <= 1 },
           { label: "关闭全部标签页", ids: openDocs.map((tab) => tab.id), disabled: openDocs.length === 0 },
         ];
-        return <div className="tab-context-menu" role="menu" style={{ left: tabMenu.x, top: tabMenu.y }} onPointerDown={(event) => event.stopPropagation()}>{menuItems.map((item, itemIndex) => <button key={item.label} className={itemIndex === 3 ? "separated" : ""} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onCloseTabs(item.ids); setTabMenu(undefined); }}>{item.label}</button>)}</div>;
+        const target = openDocs[index];
+        return <div className="tab-context-menu" role="menu" style={{ left: tabMenu.x, top: tabMenu.y }} onPointerDown={(event) => event.stopPropagation()}><button className="tab-reveal-action" type="button" role="menuitem" onClick={() => { if (target) onRevealInTree(target); setTabMenu(undefined); }}><FolderTree size={14} />在目录视图中显示</button>{menuItems.map((item, itemIndex) => <button key={item.label} className={itemIndex === 0 ? "separated" : ""} type="button" role="menuitem" disabled={item.disabled} onClick={() => { onCloseTabs(item.ids); setTabMenu(undefined); }}>{item.label}</button>)}</div>;
       })()}
       {imageViewer && <div className="image-viewer" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setImageViewer(undefined)}>
         <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>

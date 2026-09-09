@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DocFile, TreeNode } from "../types";
 
 interface TreeProps {
   nodes: TreeNode[];
   activeId?: string;
+  revealDocId?: string;
+  revealRequest?: number;
   onOpen: (doc: DocFile) => void;
   onContextMenu: (event: React.MouseEvent, doc: DocFile) => void;
   onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void;
@@ -13,17 +15,18 @@ interface TreeProps {
   depth?: number;
 }
 
-export function Tree({ nodes, activeId, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, depth = 0 }: TreeProps) {
+export function Tree({ nodes, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, depth = 0 }: TreeProps) {
   return (
     <div className="tree" role={depth === 0 ? "tree" : "group"}>
       {nodes.map((node) =>
         node.type === "folder" ? (
-          <FolderItem key={node.path} node={node} activeId={activeId} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} depth={depth} />
+          <FolderItem key={node.path} node={node} activeId={activeId} revealDocId={revealDocId} revealRequest={revealRequest} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} depth={depth} />
         ) : (
           <button
             type="button"
             role="treeitem"
             key={node.path}
+            data-doc-id={node.doc.id}
             className={`tree-row file-row ${activeId === node.doc.id ? "active" : ""}`}
             style={{ paddingLeft: 34 + depth * 20 }}
             onClick={() => onOpen(node.doc)}
@@ -41,8 +44,10 @@ export function Tree({ nodes, activeId, onOpen, onContextMenu, onFolderContextMe
   );
 }
 
-function FolderItem({ node, activeId, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, depth }: { node: Extract<TreeNode, { type: "folder" }>; activeId?: string; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (folderPath: string) => void; onMoveEntry: (sourcePath: string, targetFolder: string) => void; depth: number }) {
+function FolderItem({ node, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, depth }: { node: Extract<TreeNode, { type: "folder" }>; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (folderPath: string) => void; onMoveEntry: (sourcePath: string, targetFolder: string) => void; depth: number }) {
   const [open, setOpen] = useState(false);
+  const containsReveal = node.children.some(function contains(child): boolean { return child.type === "file" ? child.doc.id === revealDocId : child.children.some(contains); });
+  useEffect(() => { if (containsReveal) setOpen(true); }, [containsReveal, revealRequest]);
   return (
     <div>
       <div
@@ -59,7 +64,7 @@ function FolderItem({ node, activeId, onOpen, onContextMenu, onFolderContextMenu
         <button className="folder-main" type="button" onClick={() => setOpen((value) => !value)}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{node.name}</span></button>
         <button className="tree-add" type="button" aria-label={`在 ${node.name} 中新建`} title="新建" onClick={() => onCreateEntry(node.path)}><Plus size={13} /></button>
       </div>
-      {open && <Tree nodes={node.children} activeId={activeId} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} depth={depth + 1} />}
+      {open && <Tree nodes={node.children} activeId={activeId} revealDocId={revealDocId} revealRequest={revealRequest} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} depth={depth + 1} />}
     </div>
   );
 }

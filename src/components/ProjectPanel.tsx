@@ -8,6 +8,7 @@ interface ProjectPanelProps {
   width: number;
   projects: DocsProject[];
   activeId?: string;
+  revealTarget?: { docId: string; request: number };
   onAdd: () => void;
   onOpen: (doc: DocFile) => void;
   onRemove: (projectId: string) => void;
@@ -30,7 +31,7 @@ interface ProjectPanelProps {
   onOpenLark: () => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -84,6 +85,15 @@ export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemov
     return { ...project, tree: normalized ? filterTree(usefulTree) : usefulTree };
   }), [projects, normalized, contentMatches, showEmptyFolders, temporaryFolderKeys]);
   const hasSearchResults = visible.some((project) => project.tree.length > 0);
+
+  useEffect(() => {
+    if (!revealTarget) return;
+    setQuery("");
+    const reveal = () => document.querySelector<HTMLElement>(`[data-doc-id="${CSS.escape(revealTarget.docId)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const first = window.setTimeout(reveal, 40);
+    const second = window.setTimeout(reveal, 180);
+    return () => { window.clearTimeout(first); window.clearTimeout(second); };
+  }, [revealTarget]);
 
   useEffect(() => {
     if (!contextMenu && !folderMenu) return;
@@ -156,7 +166,7 @@ export function ProjectPanel({ width, projects, activeId, onAdd, onOpen, onRemov
         {!normalized && recentDocs.length > 0 && <QuickDocs title="最近访问" icon={<Clock3 size={13} />} docs={recentDocs} activeId={activeId} onOpen={onOpen} onContextMenu={showDocMenu} />}
         {normalized && isSearching && <div className="searching-state"><span />正在搜索正文…</div>}
         {normalized && !isSearching && !hasSearchResults && <div className="search-empty">没有找到“{query.trim()}”<span>试试文件名、路径或正文关键词</span></div>}
-        {visible.map((project) => <div key={project.id} data-project-id={project.id} className={`project-drag-shell ${draggingId === project.id ? "dragging" : ""} ${dropTarget?.id === project.id ? `drop-${dropTarget.position}` : ""}`}><ProjectTree project={project} activeId={activeId} onOpen={onOpen} onContextMenu={showDocMenu} onFolderContextMenu={(event, path, name) => showFolderMenu(event, project.id, path, name)} onCreateEntry={(path) => onCreateEntry(project.id, path, "file")} onMoveEntry={(source, target) => onMoveEntry(project.id, source, target)} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { draggingRef.current = project.id; setDraggingId(project.id); event.currentTarget.setPointerCapture(event.pointerId); document.body.classList.add("is-project-dragging"); }} onDragMove={moveProject} onDragEnd={stopProjectDrag} /></div>)}
+        {visible.map((project) => <div key={project.id} data-project-id={project.id} className={`project-drag-shell ${draggingId === project.id ? "dragging" : ""} ${dropTarget?.id === project.id ? `drop-${dropTarget.position}` : ""}`}><ProjectTree project={project} activeId={activeId} revealDocId={revealTarget?.docId} revealRequest={revealTarget?.request} onOpen={onOpen} onContextMenu={showDocMenu} onFolderContextMenu={(event, path, name) => showFolderMenu(event, project.id, path, name)} onCreateEntry={(path) => onCreateEntry(project.id, path, "file")} onMoveEntry={(source, target) => onMoveEntry(project.id, source, target)} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { draggingRef.current = project.id; setDraggingId(project.id); event.currentTarget.setPointerCapture(event.pointerId); document.body.classList.add("is-project-dragging"); }} onDragMove={moveProject} onDragEnd={stopProjectDrag} /></div>)}
         {!projects.length && (
           <div className="sidebar-empty">
             <div className="empty-folder"><FolderOpen size={24} /></div>
@@ -185,9 +195,11 @@ function QuickDocs({ title, icon, docs, activeId, onOpen, onContextMenu }: { tit
   return <section className="quick-section"><div className="quick-title">{icon}{title}</div>{docs.map((doc) => <button key={doc.id} type="button" className={`quick-doc ${doc.id === activeId ? "active" : ""}`} onClick={() => onOpen(doc)} onContextMenu={(event) => onContextMenu(event, doc)} title={doc.path}><FileText size={14} /><span>{doc.name.replace(/\.md$/i, "")}</span></button>)}</section>;
 }
 
-function ProjectTree({ project, activeId, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
+function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
   const [projectOpen, setProjectOpen] = useState(false);
-  const showProject = forceOpen || projectOpen;
+  const revealHere = project.files.some((doc) => doc.id === revealDocId);
+  const showProject = forceOpen || projectOpen || revealHere;
+  useEffect(() => { if (revealHere) setProjectOpen(true); }, [revealHere, revealRequest]);
 
   return (
     <section className="project" onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-zdocs-path")) event.preventDefault(); }} onDrop={(event) => { const source = event.dataTransfer.getData("application/x-zdocs-path"); if (source) { event.preventDefault(); onMoveEntry(source, ""); } }}>
@@ -205,7 +217,7 @@ function ProjectTree({ project, activeId, onOpen, onContextMenu, onFolderContext
       {showProject && project.accessStatus === "needs-permission" && (
         <div className="permission-card"><KeyRound size={15} /><span>目录访问权限已失效</span><button type="button" onClick={() => onRestore(project.id)}>重新授权</button></div>
       )}
-      {showProject && project.accessStatus === "granted" && (project.tree.length ? <Tree nodes={project.tree} activeId={activeId} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} /> : <p className="empty-tree">没有 Markdown 文档</p>)}
+      {showProject && project.accessStatus === "granted" && (project.tree.length ? <Tree nodes={project.tree} activeId={activeId} revealDocId={revealHere ? revealDocId : undefined} revealRequest={revealRequest} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} /> : <p className="empty-tree">没有 Markdown 文档</p>)}
     </section>
   );
 }

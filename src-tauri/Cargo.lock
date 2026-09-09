@@ -2529,7 +2529,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4594,7 +4594,7 @@ dependencies = [
 
 [[package]]
 name = "zdocs-reader"
-version = "0.1.26"
+version = "0.1.28"
 dependencies = [
  "base64 0.22.1",
  "serde",

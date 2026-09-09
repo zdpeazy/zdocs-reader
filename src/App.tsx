@@ -44,6 +44,7 @@ export default function App() {
   const [notice, setNotice] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem("zdocs:sidebar-width")) || 276);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("zdocs:sidebar-collapsed") === "true");
+  const [treeReveal, setTreeReveal] = useState<{ docId: string; request: number }>();
   const [renameValue, setRenameValue] = useState("");
   const [createValue, setCreateValue] = useState("");
   const [temporaryFolderKeys, setTemporaryFolderKeys] = useState<string[]>([]);
@@ -207,6 +208,12 @@ export default function App() {
       return;
     }
     void performOpenDoc(doc);
+  }
+
+  function revealDocInTree(doc: DocFile) {
+    setSidebarCollapsed(false);
+    setTreeReveal({ docId: doc.id, request: Date.now() });
+    openDoc(doc);
   }
 
   function navigateHistory(direction: -1 | 1) {
@@ -636,7 +643,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
@@ -656,7 +663,7 @@ export default function App() {
           if (event.key === "ArrowRight") setSidebarWidth((value) => Math.min(520, value + 10));
         }}
       />
-      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} />
+      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} onRevealInTree={revealDocInTree} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} />
       {quickOpen && <QuickOpen projects={projects} onOpen={openDoc} onClose={() => setQuickOpen(false)} />}
       {availableUpdate && <div className="update-banner" role="status"><span><strong>发现新版本 v{availableUpdate.version}</strong><small>已发布到 GitHub</small></span><button type="button" disabled={isDownloadingUpdate} onClick={() => { setIsDownloadingUpdate(true); setNotice("正在下载更新包…"); void downloadUpdate(availableUpdate.url, availableUpdate.fileName).then((path) => { setNotice(`更新包已下载并打开：${path}`); }).catch((error) => setNotice(error instanceof Error ? error.message : "更新下载失败")).finally(() => setIsDownloadingUpdate(false)); }}>{isDownloadingUpdate ? "下载中…" : "下载更新"}</button><button className="update-dismiss" type="button" aria-label="暂不更新" onClick={() => { localStorage.setItem("zdocs:dismissed-update", availableUpdate.version); setAvailableUpdate(undefined); }}>×</button></div>}
       {notice && <div className="toast" role="alert"><span>{notice}</span>{trashedEntry && <button className="toast-action" type="button" onClick={() => void undoTrash()}>撤销</button>}<button type="button" onClick={() => { setNotice(undefined); setTrashedEntry(undefined); }}>×</button></div>}
