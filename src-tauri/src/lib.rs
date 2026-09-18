@@ -318,21 +318,56 @@ fn write_pdf_file(output_path: String, base64_data: String) -> Result<String, St
 }
 
 #[tauri::command]
-async fn download_update(url: String, file_name: String) -> Result<String, String> {
+async fn install_update(app: tauri::AppHandle, url: String, file_name: String) -> Result<String, String> {
     if !url.starts_with("https://github.com/zdpeazy/zdocs-reader/releases/download/") || !file_name.ends_with(".dmg") || file_name.contains('/') || file_name.contains('\\') {
         return Err("更新下载地址无效".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
+    let app_bundle = std::env::current_exe().map_err(|error| error.to_string())?.ancestors().find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("app"))).map(Path::to_path_buf).ok_or("无法定位当前应用")?;
+    let app_pid = std::process::id().to_string();
+    let helper = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let home = std::env::var("HOME").map(PathBuf::from).map_err(|_| "无法定位用户目录")?;
         let downloads = home.join("Downloads");
         fs::create_dir_all(&downloads).map_err(|error| error.to_string())?;
         let target = downloads.join(file_name);
         let status = Command::new("/usr/bin/curl").args(["--location", "--fail", "--silent", "--show-error"]).arg("--output").arg(&target).arg(url).status().map_err(|error| error.to_string())?;
         if !status.success() { return Err("更新包下载失败".into()); }
-        let opened = Command::new("/usr/bin/open").arg(&target).status().map_err(|error| error.to_string())?;
-        if !opened.success() { return Err("更新包已下载，但无法自动打开".into()); }
+        let script_path = std::env::temp_dir().join(format!("zdocs-update-{}.sh", app_pid));
+        let log_path = std::env::temp_dir().join("zdocs-update.log");
+        let script = r#"#!/bin/sh
+set -u
+DMG_PATH="$1"
+APP_PATH="$2"
+APP_PID="$3"
+LOG_PATH="$4"
+exec >>"$LOG_PATH" 2>&1
+while /bin/kill -0 "$APP_PID" 2>/dev/null; do /bin/sleep 0.2; done
+MOUNT_DIR=$(/usr/bin/mktemp -d /private/tmp/zdocs-update.XXXXXX) || exit 1
+reopen_app() { /usr/bin/open "$APP_PATH" >/dev/null 2>&1 || true; }
+if ! /usr/bin/hdiutil attach "$DMG_PATH" -nobrowse -readonly -mountpoint "$MOUNT_DIR"; then reopen_app; exit 1; fi
+SOURCE_APP="$MOUNT_DIR/ZDocs.app"
+if [ ! -d "$SOURCE_APP" ] || ! /usr/bin/codesign --verify --deep --strict "$SOURCE_APP"; then
+  /usr/bin/hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+  reopen_app
+  exit 1
+fi
+if ! /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"; then
+  /usr/bin/hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+  reopen_app
+  exit 1
+fi
+/usr/bin/hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+/bin/rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+/usr/bin/open "$APP_PATH"
+"#;
+        fs::write(&script_path, script).map_err(|error| format!("无法创建更新助手：{}", error))?;
+        let chmod = Command::new("/bin/chmod").args(["700"]).arg(&script_path).status().map_err(|error| error.to_string())?;
+        if !chmod.success() { return Err("无法启动更新助手".into()); }
+        Command::new("/bin/sh").arg(&script_path).arg(&target).arg(&app_bundle).arg(&app_pid).arg(&log_path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("更新助手启动失败：{}", error))?;
         Ok(target.to_string_lossy().to_string())
-    }).await.map_err(|error| format!("更新任务执行失败：{}", error))?
+    }).await.map_err(|error| format!("更新任务执行失败：{}", error))??;
+    let app_to_close = app.clone();
+    std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(350)); app_to_close.exit(0); });
+    Ok(helper)
 }
 
 #[tauri::command]
@@ -405,7 +440,7 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, download_update, open_external_link, lark_status, lark_import, lark_publish])
+        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, install_update, open_external_link, lark_status, lark_import, lark_publish])
         .run(tauri::generate_context!())
         .expect("error while running ZDocs");
 }

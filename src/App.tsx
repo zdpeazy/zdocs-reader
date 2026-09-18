@@ -8,7 +8,7 @@ import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
 import { QuickOpen } from "./components/QuickOpen";
-import { copyAbsolutePath, createProjectDoc, createProjectEntry, downloadUpdate, exportDocument, hasReadPermission, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeDoc, writePdfFile } from "./file-system";
+import { copyAbsolutePath, createProjectDoc, createProjectEntry, exportDocument, hasReadPermission, installUpdate, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeDoc, writePdfFile } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -23,6 +23,7 @@ type PendingDialog =
   | { kind: "delete-entry"; projectId: string; path: string; name: string; entryType: "file" | "folder" }
   | { kind: "rename-folder"; projectId: string; path: string; name: string }
   | { kind: "project-visibility"; projectId: string; projectName: string }
+  | { kind: "update-confirm" }
   | { kind: "shortcuts" };
 type UpdateInfo = { version: string; url: string; fileName: string };
 
@@ -84,7 +85,7 @@ export default function App() {
         const release = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ name: string; browser_download_url: string }> };
         const version = release.tag_name?.replace(/^v/i, "");
         const asset = release.assets?.find((item) => /aarch64\.dmg$/i.test(item.name)) ?? release.assets?.find((item) => /\.dmg$/i.test(item.name));
-        if (!cancelled && version && asset && isNewerVersion(version, current) && localStorage.getItem("zdocs:dismissed-update") !== version) {
+        if (!cancelled && version && asset && isNewerVersion(version, current)) {
           setAvailableUpdate({ version, url: asset.browser_download_url, fileName: asset.name });
         }
       } catch { /* 离线时静默跳过，避免干扰本地阅读 */ }
@@ -254,6 +255,20 @@ export default function App() {
     setSidebarDropActive(false);
     setNotice(added ? `已添加 ${added} 个项目` : duplicates ? "拖入的项目已经添加过了" : "未能读取拖入的文件夹");
     window.setTimeout(() => setNotice(undefined), 2400);
+  }
+
+  async function beginUpdate() {
+    if (!availableUpdate || isDownloadingUpdate) return;
+    if (source !== savedSource && !(await saveActiveDoc())) return;
+    setDialog(undefined);
+    setIsDownloadingUpdate(true);
+    setNotice(`正在下载 ZDocs v${availableUpdate.version}，完成后将自动重启…`);
+    try {
+      await installUpdate(availableUpdate.url, availableUpdate.fileName);
+    } catch (error) {
+      setIsDownloadingUpdate(false);
+      setNotice(error instanceof Error ? error.message : "自动更新失败");
+    }
   }
 
   async function performOpenDoc(doc: DocFile, recordNavigation = true) {
@@ -759,7 +774,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} projectDropActive={sidebarDropActive} onProjectDropActiveChange={setSidebarDropActive} onBrowserProjectDrop={addProjectsFromHandles} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} projectDropActive={sidebarDropActive} onProjectDropActiveChange={setSidebarDropActive} onBrowserProjectDrop={addProjectsFromHandles} availableUpdate={availableUpdate} isUpdating={isDownloadingUpdate} onRequestUpdate={() => setDialog({ kind: "update-confirm" })} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
@@ -781,7 +796,6 @@ export default function App() {
       />
       <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} onRevealInTree={revealDocInTree} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} />
       {quickOpen && <QuickOpen projects={projects} onOpen={openDoc} onClose={() => setQuickOpen(false)} />}
-      {availableUpdate && <div className="update-banner" role="status"><span><strong>发现新版本 v{availableUpdate.version}</strong><small>已发布到 GitHub</small></span><button type="button" disabled={isDownloadingUpdate} onClick={() => { setIsDownloadingUpdate(true); setNotice("正在下载更新包…"); void downloadUpdate(availableUpdate.url, availableUpdate.fileName).then((path) => { setNotice(`更新包已下载并打开：${path}`); }).catch((error) => setNotice(error instanceof Error ? error.message : "更新下载失败")).finally(() => setIsDownloadingUpdate(false)); }}>{isDownloadingUpdate ? "下载中…" : "下载更新"}</button><button className="update-dismiss" type="button" aria-label="暂不更新" onClick={() => { localStorage.setItem("zdocs:dismissed-update", availableUpdate.version); setAvailableUpdate(undefined); }}>×</button></div>}
       {notice && <div className="toast" role="alert"><span>{notice}</span>{trashedEntry && <button className="toast-action" type="button" onClick={() => void undoTrash()}>撤销</button>}<button type="button" onClick={() => { setNotice(undefined); setTrashedEntry(undefined); }}>×</button></div>}
       {!supportsDirectoryPicker() && !isDesktop() && <div className="browser-warning">请使用 Chrome 或 Edge 打开，以授权读取本地项目目录。</div>}
       {dialog?.kind === "unsaved" && <Dialog title="文档尚未保存" description="继续操作前，要保存当前修改吗？" onClose={() => setDialog(undefined)} actions={[
@@ -810,6 +824,10 @@ export default function App() {
         { label: "取消", onClick: () => setDialog(undefined) },
         { label: "展示全部", onClick: () => { setDirectoryFilterValue(""); void submitProjectVisibility(dialog.projectId, ""); } },
         { label: "保存配置", variant: "primary", onClick: () => void submitProjectVisibility(dialog.projectId) },
+      ]} />}
+      {dialog?.kind === "update-confirm" && availableUpdate && <Dialog title={`更新到 ZDocs v${availableUpdate.version}？`} description={<div className="update-confirm-copy"><p>更新包下载完成后，ZDocs 会自动关闭、覆盖安装并重新打开。</p><p>当前未保存的文档会先保存。整个过程通常只需要几秒钟，无需手动打开 DMG。</p></div>} onClose={() => setDialog(undefined)} actions={[
+        { label: "暂不更新", onClick: () => setDialog(undefined) },
+        { label: "自动更新并重启", variant: "primary", onClick: () => void beginUpdate() },
       ]} />}
       {dialog?.kind === "create" && <Dialog title={dialog.entryType === "file" ? "新建 Markdown" : "新建文件夹"} description={<label className="rename-field"><span>{dialog.folderPath || "项目根目录"}</span><input autoFocus value={createValue} placeholder={dialog.entryType === "file" ? "例如：接口说明.md" : "例如：设计文档"} onChange={(event) => setCreateValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && createValue.trim()) void submitCreateEntry(dialog.projectId, dialog.folderPath, dialog.entryType); }} /></label>} onClose={() => setDialog(undefined)} actions={[
         { label: "取消", onClick: () => setDialog(undefined) },

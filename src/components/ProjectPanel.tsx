@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileOutput, FilePlus2, FileText, FolderInput, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, Star, Sun, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, Download, FileOutput, FilePlus2, FileText, FolderInput, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, Star, Sun, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readDoc } from "../file-system";
 import type { DocFile, DocsProject, TreeNode } from "../types";
@@ -33,9 +33,12 @@ interface ProjectPanelProps {
   projectDropActive: boolean;
   onProjectDropActiveChange: (active: boolean) => void;
   onBrowserProjectDrop: (handles: FileSystemDirectoryHandle[]) => void;
+  availableUpdate?: { version: string };
+  isUpdating: boolean;
+  onRequestUpdate: () => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark, projectDropActive, onProjectDropActiveChange, onBrowserProjectDrop }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark, projectDropActive, onProjectDropActiveChange, onBrowserProjectDrop, availableUpdate, isUpdating, onRequestUpdate }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -194,7 +197,14 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
         )}
       </div>
       </>}
-      <div className="sidebar-footer"><button className="sidebar-collapse-button" type="button" onClick={onToggleCollapsed} aria-label={collapsed ? "展开左侧栏" : "收起左侧栏"} title={collapsed ? "展开左侧栏" : "收起左侧栏"}>{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>{!collapsed && <><span className="status-dot" />本地模式<button type="button" onClick={onShowShortcuts} aria-label="查看快捷键" title="快捷键"><CircleHelp size={14} /></button><button type="button" onClick={onToggleTheme} aria-label="切换主题" title="切换明暗主题">{theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}</button></>}</div>
+      {availableUpdate && <div className={`sidebar-update ${collapsed ? "compact" : ""}`}><button type="button" disabled={isUpdating} onClick={onRequestUpdate} title={`更新到 ZDocs v${availableUpdate.version}`} aria-label={`立即更新到版本 ${availableUpdate.version}`}><span className="sidebar-update-icon"><Download size={15} /></span>{!collapsed && <><span><strong>新版本 v{availableUpdate.version}</strong><small>{isUpdating ? "正在下载更新…" : "已准备好更新"}</small></span><b>{isUpdating ? "下载中" : "立即更新"}</b></>}</button></div>}
+      <div className="sidebar-footer">
+        {!collapsed && <span className="local-status"><span className="status-dot" />本地模式</span>}
+        <div className="sidebar-footer-actions">
+          {!collapsed && <><button type="button" onClick={onShowShortcuts} aria-label="查看快捷键" title="快捷键"><CircleHelp size={14} /></button><button type="button" onClick={onToggleTheme} aria-label="切换主题" title="切换明暗主题">{theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}</button></>}
+          <button className="sidebar-collapse-button" type="button" onClick={onToggleCollapsed} aria-label={collapsed ? "展开左侧栏" : "收起左侧栏"} title={collapsed ? "展开左侧栏" : "收起左侧栏"}>{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>
+        </div>
+      </div>
       {contextMenu && <div className="doc-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>{[
         { action: "reveal" as const, label: "在 Finder 中显示", icon: <FolderOpen size={15} /> },
         { action: "copy-path" as const, label: "复制绝对路径", icon: <Copy size={15} /> },
@@ -224,7 +234,6 @@ function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, on
       <div className="project-title">
         <button className="collapse-button project-collapse" type="button" aria-expanded={showProject} onClick={() => setProjectOpen((value) => !value)} onContextMenu={(event) => onFolderContextMenu(event, "", project.name)}>
           {showProject ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          <span className="project-dot" />
           <strong>{project.name}</strong>
           <span className="file-count">{project.accessStatus === "granted" ? project.files.length : "需授权"}</span>
         </button>
