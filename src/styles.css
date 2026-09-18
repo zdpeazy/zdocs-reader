@@ -7,7 +7,12 @@ body { margin: 0; min-width: 980px; min-height: 100vh; overflow: hidden; }
 button, input, textarea { font: inherit; }
 button { color: inherit; }
 .app-shell { display: flex; width: 100vw; height: 100vh; background: var(--paper); }
-.sidebar { width: 276px; flex: 0 0 276px; min-width: 0; display: flex; flex-direction: column; background: #edede8; }
+.sidebar { position: relative; width: 276px; flex: 0 0 276px; min-width: 0; display: flex; flex-direction: column; background: #edede8; }
+.sidebar-project-drop-overlay { position: absolute; z-index: 900; inset: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border: 1.5px dashed #347d68; border-radius: 13px; background: #f8fbf9ed; color: #245f4e; box-shadow: 0 12px 34px #263c3422, inset 0 0 0 4px #347d6808; pointer-events: none; backdrop-filter: blur(12px); }
+.sidebar-project-drop-overlay > span { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 13px; background: #347d6814; color: #347d68; }
+.sidebar-project-drop-overlay strong { font-size: 13px; font-weight: 600; }
+.sidebar-project-drop-overlay small { color: #718078; font-size: 10px; }
+.sidebar.project-drop-active { box-shadow: inset 0 0 0 2px #347d6855; }
 .sidebar.collapsed { align-items: stretch; }
 .sidebar.collapsed .brand-row { justify-content: center; padding: 0 8px; }
 .collapsed-projects { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 13px 6px; overflow-x: hidden; overflow-y: auto; }
@@ -533,6 +538,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid #347d6866; outlin
   background: var(--canvas);
 }
 .theme-dark .sidebar { background: var(--sidebar-surface); box-shadow: inset -1px 0 #343434; }
+.theme-dark .sidebar.project-drop-active { box-shadow: inset 0 0 0 2px #79b9a455; }
+.theme-dark .sidebar-project-drop-overlay { border-color: #79b9a4; background: #202824f2; color: #c4e2d7; box-shadow: 0 14px 38px #0006, inset 0 0 0 4px #79b9a408; }
+.theme-dark .sidebar-project-drop-overlay > span { background: #79b9a418; color: #9bd0be; }
+.theme-dark .sidebar-project-drop-overlay small { color: #93a59e; }
 .theme-dark .brand-mark { background: #eeeeeb; color: #202120; box-shadow: 0 2px 6px #0005; }
 .theme-dark .collapsed-projects button.active { border-color: #79b9a466; background: #26352f; color: #a9d5c6; }
 .theme-dark .icon-button, .theme-dark .search-box, .theme-dark .view-switch, .theme-dark .save-button { border-color: #41443e; background: #2a2d28; color: #c6c8c1; }

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileOutput, FilePlus2, FileText, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, Star, Sun, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileOutput, FilePlus2, FileText, FolderInput, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, Star, Sun, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readDoc } from "../file-system";
 import type { DocFile, DocsProject, TreeNode } from "../types";
@@ -30,9 +30,12 @@ interface ProjectPanelProps {
   onToggleTheme: () => void;
   onShowShortcuts: () => void;
   onOpenLark: () => void;
+  projectDropActive: boolean;
+  onProjectDropActiveChange: (active: boolean) => void;
+  onBrowserProjectDrop: (handles: FileSystemDirectoryHandle[]) => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark, projectDropActive, onProjectDropActiveChange, onBrowserProjectDrop }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -142,8 +145,21 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
+  async function dropBrowserDirectories(event: React.DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    const handles: FileSystemDirectoryHandle[] = [];
+    for (const item of Array.from(event.dataTransfer.items)) {
+      const handle = await (item as DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> }).getAsFileSystemHandle?.();
+      if (handle?.kind === "directory") handles.push(handle as FileSystemDirectoryHandle);
+    }
+    onProjectDropActiveChange(false);
+    if (handles.length) onBrowserProjectDrop(handles);
+  }
+
   return (
-    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`} style={{ width: collapsed ? 52 : width, flexBasis: collapsed ? 52 : width }}>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${projectDropActive ? "project-drop-active" : ""}`} style={{ width: collapsed ? 52 : width, flexBasis: collapsed ? 52 : width }} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); onProjectDropActiveChange(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; onProjectDropActiveChange(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onProjectDropActiveChange(false); }} onDrop={(event) => void dropBrowserDirectories(event)}>
+      {projectDropActive && <div className="sidebar-project-drop-overlay"><span><FolderInput size={24} /></span><strong>添加项目</strong><small>松开以导入文件夹</small></div>}
       <div className="brand-row">
         <div className="brand-mark">Z</div>
         {!collapsed && <><div><strong>ZDocs</strong><span>文档中心</span></div><button className="icon-button refresh-button" type="button" onClick={onOpenLark} aria-label="飞书文档" title="导入或发布飞书文档"><Cloud size={16} /></button><button className="icon-button compact-button" type="button" onClick={onRefresh} aria-label="重新扫描项目" title="重新扫描项目"><RefreshCw size={16} /></button><button className="icon-button" type="button" onClick={onAdd} aria-label="添加项目" title="添加项目"><Plus size={18} /></button></>}

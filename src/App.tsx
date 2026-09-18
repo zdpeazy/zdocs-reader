@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
@@ -57,7 +59,11 @@ export default function App() {
   const [trashedEntry, setTrashedEntry] = useState<{ projectId: string; path: string; trashPath: string }>();
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo>();
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+  const [sidebarDropActive, setSidebarDropActive] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
+  const projectsRef = useRef<DocsProject[]>([]);
+
+  useEffect(() => { projectsRef.current = projects; }, [projects]);
 
   useEffect(() => localStorage.setItem("zdocs:view-mode", mode), [mode]);
   useEffect(() => localStorage.setItem("zdocs:sidebar-width", String(sidebarWidth)), [sidebarWidth]);
@@ -86,6 +92,33 @@ export default function App() {
     void check();
     const timer = window.setInterval(check, 6 * 60 * 60 * 1000);
     return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let scaleFactor = window.devicePixelRatio || 1;
+    const isInsideSidebar = (position: { x: number; y: number }) => {
+      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      if (!sidebar) return false;
+      const rect = sidebar.getBoundingClientRect();
+      const x = position.x / scaleFactor;
+      const y = position.y / scaleFactor;
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    void getCurrentWindow().scaleFactor().then((value) => { scaleFactor = value; });
+    void getCurrentWebview().onDragDropEvent((event) => {
+      if (disposed) return;
+      const payload = event.payload;
+      if (payload.type === "leave") { setSidebarDropActive(false); return; }
+      const inside = isInsideSidebar(payload.position);
+      if (payload.type === "enter" || payload.type === "over") setSidebarDropActive(inside);
+      if (payload.type === "drop") {
+        setSidebarDropActive(false);
+        if (inside) void addProjectsFromPaths(payload.paths);
+      }
+    }).then((dispose) => { if (disposed) dispose(); else unlisten = dispose; });
+    return () => { disposed = true; unlisten?.(); };
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +212,48 @@ export default function App() {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setNotice(error instanceof Error ? error.message : "添加项目失败");
     }
+  }
+
+  async function addProjectsFromPaths(paths: string[]) {
+    let added = 0;
+    let duplicates = 0;
+    let invalid = 0;
+    for (const path of [...new Set(paths)]) {
+      try {
+        const project = await projectFromPath(path);
+        if (projectsRef.current.some((item) => item.rootPath === project.rootPath)) { duplicates += 1; continue; }
+        const next = [...projectsRef.current, project];
+        projectsRef.current = next;
+        setProjects(next);
+        localStorage.setItem("zdocs:project-order", JSON.stringify(next.map((item) => item.id)));
+        await storeProject({ id: project.id, name: project.name, rootPath: project.rootPath, visibleDirectories: project.visibleDirectories });
+        added += 1;
+      } catch { invalid += 1; }
+    }
+    if (added) setNotice(`已添加 ${added} 个项目${duplicates ? `，跳过 ${duplicates} 个重复项目` : ""}`);
+    else if (duplicates && !invalid) setNotice("拖入的项目已经添加过了");
+    else setNotice("未能添加项目，请从 Finder 拖入文件夹");
+    window.setTimeout(() => setNotice(undefined), 2600);
+  }
+
+  async function addProjectsFromHandles(handles: FileSystemDirectoryHandle[]) {
+    let added = 0;
+    let duplicates = 0;
+    for (const handle of handles) {
+      try {
+        const project = await projectFromHandle(handle);
+        if (projectsRef.current.some((item) => item.name === project.name && item.rootHandle?.name === handle.name)) { duplicates += 1; continue; }
+        const next = [...projectsRef.current, project];
+        projectsRef.current = next;
+        setProjects(next);
+        localStorage.setItem("zdocs:project-order", JSON.stringify(next.map((item) => item.id)));
+        await storeProject({ id: project.id, name: project.name, rootHandle: project.rootHandle, visibleDirectories: project.visibleDirectories });
+        added += 1;
+      } catch { /* invalid handles are ignored */ }
+    }
+    setSidebarDropActive(false);
+    setNotice(added ? `已添加 ${added} 个项目` : duplicates ? "拖入的项目已经添加过了" : "未能读取拖入的文件夹");
+    window.setTimeout(() => setNotice(undefined), 2400);
   }
 
   async function performOpenDoc(doc: DocFile, recordNavigation = true) {
@@ -684,7 +759,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} projectDropActive={sidebarDropActive} onProjectDropActiveChange={setSidebarDropActive} onBrowserProjectDrop={addProjectsFromHandles} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
