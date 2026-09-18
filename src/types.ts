@@ -30,6 +30,7 @@ export interface DocsProject {
   name: string;
   rootHandle?: FileSystemDirectoryHandle;
   rootPath?: string;
+  visibleDirectories: string[];
   accessStatus: "granted" | "needs-permission";
   tree: TreeNode[];
   files: DocFile[];

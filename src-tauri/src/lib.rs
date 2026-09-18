@@ -2,6 +2,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -31,6 +32,7 @@ struct NativeProject {
     id: String,
     name: String,
     root_path: String,
+    visible_directories: Vec<String>,
     access_status: String,
     tree: Vec<TreeNode>,
     files: Vec<NativeDoc>,
@@ -45,16 +47,17 @@ struct FileSnapshot {
 
 const IGNORED: &[&str] = &[".git", ".idea", ".vscode", "node_modules", "dist", "build", "coverage", ".next", ".nuxt", "target", "vendor"];
 
-fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<NativeDoc>) -> Result<Vec<TreeNode>, String> {
+fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<NativeDoc>, visible_directories: Option<&HashSet<String>>) -> Result<Vec<TreeNode>, String> {
     let mut nodes = Vec::new();
     let entries = fs::read_dir(current).map_err(|error| error.to_string())?;
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
+        if current == root && visible_directories.is_some_and(|directories| !path.is_dir() || !directories.contains(&name)) { continue; }
         if path.is_dir() && IGNORED.contains(&name.as_str()) { continue; }
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/");
         if path.is_dir() {
-            let children = scan_dir(root, &path, project_id, files)?;
+            let children = scan_dir(root, &path, project_id, files, visible_directories)?;
             nodes.push(TreeNode::Folder { name, path: relative, children });
         } else if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("md")) {
             let doc = NativeDoc { id: format!("{}:{}", project_id, relative), name: name.clone(), path: relative.clone(), project_id: project_id.to_string(), native_path: path.to_string_lossy().to_string() };
@@ -71,12 +74,14 @@ fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<Nativ
 }
 
 #[tauri::command]
-fn scan_project(root_path: String, project_id: String) -> Result<NativeProject, String> {
+fn scan_project(root_path: String, project_id: String, visible_directories: Option<Vec<String>>) -> Result<NativeProject, String> {
     let root = PathBuf::from(&root_path).canonicalize().map_err(|error| error.to_string())?;
     let mut files = Vec::new();
-    let tree = scan_dir(&root, &root, &project_id, &mut files)?;
+    let visible_directories = visible_directories.unwrap_or_default();
+    let directory_filter = (!visible_directories.is_empty()).then(|| visible_directories.iter().cloned().collect::<HashSet<_>>());
+    let tree = scan_dir(&root, &root, &project_id, &mut files, directory_filter.as_ref())?;
     let name = root.file_name().map(|value| value.to_string_lossy().to_string()).unwrap_or_else(|| root_path.clone());
-    Ok(NativeProject { id: project_id, name, root_path: root.to_string_lossy().to_string(), access_status: "granted".into(), tree, files })
+    Ok(NativeProject { id: project_id, name, root_path: root.to_string_lossy().to_string(), visible_directories, access_status: "granted".into(), tree, files })
 }
 
 fn modified_ms(path: &Path) -> u64 {

@@ -20,6 +20,7 @@ type PendingDialog =
   | { kind: "create"; projectId: string; folderPath: string; entryType: "file" | "folder" }
   | { kind: "delete-entry"; projectId: string; path: string; name: string; entryType: "file" | "folder" }
   | { kind: "rename-folder"; projectId: string; path: string; name: string }
+  | { kind: "project-visibility"; projectId: string; projectName: string }
   | { kind: "shortcuts" };
 type UpdateInfo = { version: string; url: string; fileName: string };
 
@@ -47,6 +48,7 @@ export default function App() {
   const [treeReveal, setTreeReveal] = useState<{ docId: string; request: number }>();
   const [renameValue, setRenameValue] = useState("");
   const [createValue, setCreateValue] = useState("");
+  const [directoryFilterValue, setDirectoryFilterValue] = useState("");
   const [temporaryFolderKeys, setTemporaryFolderKeys] = useState<string[]>([]);
   const [openTabIds, setOpenTabIds] = useState<string[]>(() => readStoredList("zdocs:open-tabs"));
   const [closedTabIds, setClosedTabIds] = useState<string[]>([]);
@@ -96,12 +98,13 @@ export default function App() {
       });
       const restored: DocsProject[] = [];
       for (const item of stored) {
+        const visibleDirectories = item.visibleDirectories ?? [];
         if (item.rootPath) {
-          try { restored.push(await projectFromPath(item.rootPath, item.id)); } catch { restored.push({ id: item.id, name: item.name, rootPath: item.rootPath, accessStatus: "needs-permission", tree: [], files: [] }); }
+          try { restored.push(await projectFromPath(item.rootPath, item.id, visibleDirectories)); } catch { restored.push({ id: item.id, name: item.name, rootPath: item.rootPath, visibleDirectories, accessStatus: "needs-permission", tree: [], files: [] }); }
         } else if (item.rootHandle && await hasReadPermission(item.rootHandle)) {
-          restored.push(await projectFromHandle(item.rootHandle, item.id));
+          restored.push(await projectFromHandle(item.rootHandle, item.id, visibleDirectories));
         } else if (item.rootHandle) {
-          restored.push({ id: item.id, name: item.name, rootHandle: item.rootHandle, accessStatus: "needs-permission", tree: [], files: [] });
+          restored.push({ id: item.id, name: item.name, rootHandle: item.rootHandle, visibleDirectories, accessStatus: "needs-permission", tree: [], files: [] });
         }
       }
       if (cancelled) return;
@@ -169,7 +172,7 @@ export default function App() {
       }
       setProjects((current) => [...current, project]);
       localStorage.setItem("zdocs:project-order", JSON.stringify([...projects.map((item) => item.id), project.id]));
-      await storeProject({ id: project.id, name: project.name, rootHandle: project.rootHandle, rootPath: project.rootPath });
+      await storeProject({ id: project.id, name: project.name, rootHandle: project.rootHandle, rootPath: project.rootPath, visibleDirectories: project.visibleDirectories });
       if (!activeDoc && project.files[0]) await performOpenDoc(project.files[0]);
       setNotice(undefined);
     } catch (error) {
@@ -302,10 +305,10 @@ export default function App() {
     try {
       let restored: DocsProject;
       if (project.rootPath) {
-        restored = await projectFromPath(project.rootPath, project.id);
+        restored = await projectFromPath(project.rootPath, project.id, project.visibleDirectories);
       } else {
         if (!project.rootHandle || !(await requestReadPermission(project.rootHandle))) return;
-        restored = await projectFromHandle(project.rootHandle, project.id);
+        restored = await projectFromHandle(project.rootHandle, project.id, project.visibleDirectories);
       }
       setProjects((current) => current.map((item) => item.id === id ? restored : item));
       setNotice(`项目“${project.name}”已恢复`);
@@ -318,8 +321,8 @@ export default function App() {
     try {
       const refreshed = await Promise.all(projects.map(async (project) => {
         if (project.accessStatus !== "granted") return project;
-        if (project.rootPath) return projectFromPath(project.rootPath, project.id);
-        if (project.rootHandle) return projectFromHandle(project.rootHandle, project.id);
+        if (project.rootPath) return projectFromPath(project.rootPath, project.id, project.visibleDirectories);
+        if (project.rootHandle) return projectFromHandle(project.rootHandle, project.id, project.visibleDirectories);
         return project;
       }));
       setProjects(refreshed);
@@ -331,9 +334,47 @@ export default function App() {
   }
 
   async function refreshProject(project: DocsProject) {
-    if (project.rootPath) return projectFromPath(project.rootPath, project.id);
-    if (project.rootHandle) return projectFromHandle(project.rootHandle, project.id);
+    if (project.rootPath) return projectFromPath(project.rootPath, project.id, project.visibleDirectories);
+    if (project.rootHandle) return projectFromHandle(project.rootHandle, project.id, project.visibleDirectories);
     return project;
+  }
+
+  function configureProjectVisibility(projectId: string) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    setDirectoryFilterValue(project.visibleDirectories.join(", "));
+    setDialog({ kind: "project-visibility", projectId, projectName: project.name });
+  }
+
+  async function submitProjectVisibility(projectId: string, value = directoryFilterValue) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const visibleDirectories = [...new Set(value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean))];
+    if (visibleDirectories.some((name) => name === "." || name === ".." || name.includes("/") || name.includes("\\"))) {
+      setNotice("请填写项目根目录下的文件夹名称，不要包含路径分隔符");
+      return;
+    }
+    try {
+      const configured = { ...project, visibleDirectories };
+      const refreshed = await refreshProject(configured);
+      if (activeDoc?.projectId === projectId && !refreshed.files.some((doc) => doc.id === activeDoc.id) && source !== savedSource) {
+        setNotice("当前文档有未保存修改，请先保存后再隐藏所在目录");
+        return;
+      }
+      setProjects((current) => current.map((item) => item.id === projectId ? refreshed : item));
+      await storeProject({ id: refreshed.id, name: refreshed.name, rootHandle: refreshed.rootHandle, rootPath: refreshed.rootPath, visibleDirectories });
+      if (activeDoc?.projectId === projectId && !refreshed.files.some((doc) => doc.id === activeDoc.id)) {
+        setActiveDoc(undefined);
+        setSource("");
+        setSavedSource("");
+        localStorage.removeItem("zdocs:last-doc");
+      }
+      setDialog(undefined);
+      setNotice(visibleDirectories.length ? `现在只展示 ${visibleDirectories.join("、")}` : "已恢复展示项目中的全部 Markdown 目录");
+      window.setTimeout(() => setNotice(undefined), 2400);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "目录展示配置失败");
+    }
   }
 
   function toggleFavorite() {
@@ -350,7 +391,7 @@ export default function App() {
     const project = projects.find((item) => item.id === projectId);
     if (!project) throw new Error("目标项目不存在或需要重新授权");
     const createdPath = await createProjectDoc(project, path, content);
-    const refreshed = project.rootPath ? await projectFromPath(project.rootPath, project.id) : project.rootHandle ? await projectFromHandle(project.rootHandle, project.id) : project;
+    const refreshed = project.rootPath ? await projectFromPath(project.rootPath, project.id, project.visibleDirectories) : project.rootHandle ? await projectFromHandle(project.rootHandle, project.id, project.visibleDirectories) : project;
     setProjects((current) => current.map((item) => item.id === project.id ? refreshed : item));
     const doc = refreshed.files.find((item) => item.path === createdPath);
     if (doc) {
@@ -643,7 +684,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
@@ -689,6 +730,11 @@ export default function App() {
       {dialog?.kind === "rename-folder" && <Dialog title="重命名文件夹" description={<label className="rename-field"><span>文件夹名称</span><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Enter" && renameValue.trim()) void submitRenameFolder(dialog.projectId, dialog.path); }} /></label>} onClose={() => setDialog(undefined)} actions={[
         { label: "取消", onClick: () => setDialog(undefined) },
         { label: "确认重命名", variant: "primary", onClick: () => void submitRenameFolder(dialog.projectId, dialog.path) },
+      ]} />}
+      {dialog?.kind === "project-visibility" && <Dialog title="配置展示目录" description={<div className="directory-filter-form"><p>为项目“<strong>{dialog.projectName}</strong>”指定需要展示的顶层文件夹。多个名称可用逗号分隔，留空则展示整个项目中的 Markdown 文档。</p><label className="rename-field"><span>展示的文件夹</span><input autoFocus value={directoryFilterValue} placeholder="例如：zdocs, .claude" onChange={(event) => setDirectoryFilterValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitProjectVisibility(dialog.projectId); }} /></label><small>配置后，搜索、快速打开和文档数量也只包含这些目录。</small></div>} onClose={() => setDialog(undefined)} actions={[
+        { label: "取消", onClick: () => setDialog(undefined) },
+        { label: "展示全部", onClick: () => { setDirectoryFilterValue(""); void submitProjectVisibility(dialog.projectId, ""); } },
+        { label: "保存配置", variant: "primary", onClick: () => void submitProjectVisibility(dialog.projectId) },
       ]} />}
       {dialog?.kind === "create" && <Dialog title={dialog.entryType === "file" ? "新建 Markdown" : "新建文件夹"} description={<label className="rename-field"><span>{dialog.folderPath || "项目根目录"}</span><input autoFocus value={createValue} placeholder={dialog.entryType === "file" ? "例如：接口说明.md" : "例如：设计文档"} onChange={(event) => setCreateValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && createValue.trim()) void submitCreateEntry(dialog.projectId, dialog.folderPath, dialog.entryType); }} /></label>} onClose={() => setDialog(undefined)} actions={[
         { label: "取消", onClick: () => setDialog(undefined) },

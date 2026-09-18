@@ -16,15 +16,17 @@ async function scanDirectory(
   directory: FileSystemDirectoryHandle,
   projectId: string,
   prefix = "",
+  visibleDirectories: string[] = [],
 ): Promise<{ tree: TreeNode[]; files: DocFile[] }> {
   const tree: TreeNode[] = [];
   const files: DocFile[] = [];
 
   for await (const [name, handle] of directory.entries()) {
+    if (!prefix && visibleDirectories.length && (handle.kind !== "directory" || !visibleDirectories.includes(name))) continue;
     if (handle.kind === "directory" && IGNORED_DIRECTORIES.has(name)) continue;
     const path = prefix ? `${prefix}/${name}` : name;
     if (handle.kind === "directory") {
-      const child = await scanDirectory(handle, projectId, path);
+      const child = await scanDirectory(handle, projectId, path, visibleDirectories);
       tree.push({ type: "folder", name, path, children: child.tree });
       files.push(...child.files);
     } else if (name.toLowerCase().endsWith(".md")) {
@@ -55,13 +57,13 @@ export function isDesktop() {
   return "__TAURI_INTERNALS__" in window;
 }
 
-export function projectFromPath(rootPath: string, id: string = crypto.randomUUID()) {
-  return invoke<DocsProject>("scan_project", { rootPath, projectId: id });
+export function projectFromPath(rootPath: string, id: string = crypto.randomUUID(), visibleDirectories: string[] = []) {
+  return invoke<DocsProject>("scan_project", { rootPath, projectId: id, visibleDirectories });
 }
 
-export async function projectFromHandle(rootHandle: FileSystemDirectoryHandle, id: string = crypto.randomUUID()): Promise<DocsProject> {
-  const { tree, files } = await scanDirectory(rootHandle, id);
-  return { id, name: rootHandle.name, rootHandle, accessStatus: "granted", tree, files };
+export async function projectFromHandle(rootHandle: FileSystemDirectoryHandle, id: string = crypto.randomUUID(), visibleDirectories: string[] = []): Promise<DocsProject> {
+  const { tree, files } = await scanDirectory(rootHandle, id, "", visibleDirectories);
+  return { id, name: rootHandle.name, rootHandle, visibleDirectories, accessStatus: "granted", tree, files };
 }
 
 export async function pickProject(): Promise<DocsProject> {

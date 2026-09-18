@@ -3,6 +3,7 @@ interface StoredProject {
   name: string;
   rootHandle?: FileSystemDirectoryHandle;
   rootPath?: string;
+  visibleDirectories?: string[];
 }
 
 const DATABASE = "zdocs-reader";

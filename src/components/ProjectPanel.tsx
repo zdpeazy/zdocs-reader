@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileOutput, FilePlus2, FileText, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileOutput, FilePlus2, FileText, FolderOpen, FolderPlus, GripVertical, KeyRound, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, Star, Sun, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readDoc } from "../file-system";
 import type { DocFile, DocsProject, TreeNode } from "../types";
@@ -15,6 +15,7 @@ interface ProjectPanelProps {
   onRestore: (projectId: string) => void;
   onRefresh: () => void;
   onReorder: (draggedId: string, targetId: string, position: "before" | "after") => void;
+  onConfigure: (projectId: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onDocAction: (action: "reveal" | "copy-path" | "rename" | "export-pdf" | "export-docx" | "delete", doc: DocFile) => void;
@@ -31,7 +32,7 @@ interface ProjectPanelProps {
   onOpenLark: () => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -166,7 +167,7 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
         {!normalized && recentDocs.length > 0 && <QuickDocs title="最近访问" icon={<Clock3 size={13} />} docs={recentDocs} activeId={activeId} onOpen={onOpen} onContextMenu={showDocMenu} />}
         {normalized && isSearching && <div className="searching-state"><span />正在搜索正文…</div>}
         {normalized && !isSearching && !hasSearchResults && <div className="search-empty">没有找到“{query.trim()}”<span>试试文件名、路径或正文关键词</span></div>}
-        {visible.map((project) => <div key={project.id} data-project-id={project.id} className={`project-drag-shell ${draggingId === project.id ? "dragging" : ""} ${dropTarget?.id === project.id ? `drop-${dropTarget.position}` : ""}`}><ProjectTree project={project} activeId={activeId} revealDocId={revealTarget?.docId} revealRequest={revealTarget?.request} onOpen={onOpen} onContextMenu={showDocMenu} onFolderContextMenu={(event, path, name) => showFolderMenu(event, project.id, path, name)} onCreateEntry={(path) => onCreateEntry(project.id, path, "file")} onMoveEntry={(source, target) => onMoveEntry(project.id, source, target)} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { draggingRef.current = project.id; setDraggingId(project.id); event.currentTarget.setPointerCapture(event.pointerId); document.body.classList.add("is-project-dragging"); }} onDragMove={moveProject} onDragEnd={stopProjectDrag} /></div>)}
+        {visible.map((project) => <div key={project.id} data-project-id={project.id} className={`project-drag-shell ${draggingId === project.id ? "dragging" : ""} ${dropTarget?.id === project.id ? `drop-${dropTarget.position}` : ""}`}><ProjectTree project={project} activeId={activeId} revealDocId={revealTarget?.docId} revealRequest={revealTarget?.request} onOpen={onOpen} onContextMenu={showDocMenu} onFolderContextMenu={(event, path, name) => showFolderMenu(event, project.id, path, name)} onCreateEntry={(path) => onCreateEntry(project.id, path, "file")} onMoveEntry={(source, target) => onMoveEntry(project.id, source, target)} onConfigure={onConfigure} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { draggingRef.current = project.id; setDraggingId(project.id); event.currentTarget.setPointerCapture(event.pointerId); document.body.classList.add("is-project-dragging"); }} onDragMove={moveProject} onDragEnd={stopProjectDrag} /></div>)}
         {!projects.length && (
           <div className="sidebar-empty">
             <div className="empty-folder"><FolderOpen size={24} /></div>
@@ -195,14 +196,15 @@ function QuickDocs({ title, icon, docs, activeId, onOpen, onContextMenu }: { tit
   return <section className="quick-section"><div className="quick-title">{icon}{title}</div>{docs.map((doc) => <button key={doc.id} type="button" className={`quick-doc ${doc.id === activeId ? "active" : ""}`} onClick={() => onOpen(doc)} onContextMenu={(event) => onContextMenu(event, doc)} title={doc.path}><FileText size={14} /><span>{doc.name.replace(/\.md$/i, "")}</span></button>)}</section>;
 }
 
-function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
+function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onConfigure, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onConfigure: (projectId: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
   const [projectOpen, setProjectOpen] = useState(false);
+  const [rootDropActive, setRootDropActive] = useState(false);
   const revealHere = project.files.some((doc) => doc.id === revealDocId);
   const showProject = forceOpen || projectOpen || revealHere;
   useEffect(() => { if (revealHere) setProjectOpen(true); }, [revealHere, revealRequest]);
 
   return (
-    <section className="project" onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-zdocs-path")) event.preventDefault(); }} onDrop={(event) => { const source = event.dataTransfer.getData("application/x-zdocs-path"); if (source) { event.preventDefault(); onMoveEntry(source, ""); } }}>
+    <section data-zdocs-drop-project={project.id} data-folder-path="" className={`project ${rootDropActive ? "root-drop-active" : ""}`} onDragOver={(event) => { const payload = event.dataTransfer.getData("application/x-zdocs-entry"); if (payload) { try { if ((JSON.parse(payload) as { projectId: string }).projectId !== project.id) return; } catch { return; } } else if (!event.dataTransfer.types.includes("application/x-zdocs-path")) return; event.preventDefault(); event.dataTransfer.dropEffect = "move"; setRootDropActive(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setRootDropActive(false); }} onDrop={(event) => { setRootDropActive(false); const payload = event.dataTransfer.getData("application/x-zdocs-entry"); let source = event.dataTransfer.getData("application/x-zdocs-path"); if (payload) { try { const entry = JSON.parse(payload) as { projectId: string; path: string }; if (entry.projectId !== project.id) return; source = entry.path; } catch { return; } } if (source) { event.preventDefault(); onMoveEntry(source, ""); } }}>
       <div className="project-title">
         <button className="collapse-button project-collapse" type="button" aria-expanded={showProject} onClick={() => setProjectOpen((value) => !value)} onContextMenu={(event) => onFolderContextMenu(event, "", project.name)}>
           {showProject ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -211,13 +213,14 @@ function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, on
           <span className="file-count">{project.accessStatus === "granted" ? project.files.length : "需授权"}</span>
         </button>
         <button className="project-add-button" type="button" onClick={() => onCreateEntry("")} aria-label={`在 ${project.name} 中新建 Markdown`} title="新建 Markdown"><Plus size={14} /></button>
+        <button className={`project-configure-button ${project.visibleDirectories.length ? "configured" : ""}`} type="button" onClick={() => onConfigure(project.id)} aria-label={`配置 ${project.name} 的展示目录`} title={project.visibleDirectories.length ? `当前只展示：${project.visibleDirectories.join("、")}` : "配置展示目录"}><Settings2 size={14} /></button>
         <button className="project-drag-handle" type="button" onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd} aria-label={`拖动排序 ${project.name}`} title="拖动调整项目顺序"><GripVertical size={14} /></button>
         <button className="remove-button" type="button" onClick={() => onRemove(project.id)} aria-label={`移除 ${project.name}`} title="从列表中移除项目"><Trash2 size={15} /></button>
       </div>
       {showProject && project.accessStatus === "needs-permission" && (
         <div className="permission-card"><KeyRound size={15} /><span>目录访问权限已失效</span><button type="button" onClick={() => onRestore(project.id)}>重新授权</button></div>
       )}
-      {showProject && project.accessStatus === "granted" && (project.tree.length ? <Tree nodes={project.tree} activeId={activeId} revealDocId={revealHere ? revealDocId : undefined} revealRequest={revealRequest} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} /> : <p className="empty-tree">没有 Markdown 文档</p>)}
+      {showProject && project.accessStatus === "granted" && (project.tree.length ? <Tree projectId={project.id} nodes={project.tree} activeId={activeId} revealDocId={revealHere ? revealDocId : undefined} revealRequest={revealRequest} onOpen={onOpen} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} onCreateEntry={onCreateEntry} onMoveEntry={onMoveEntry} /> : <p className="empty-tree">{project.visibleDirectories.length ? "指定目录中没有 Markdown 文档" : "没有 Markdown 文档"}</p>)}
     </section>
   );
 }
