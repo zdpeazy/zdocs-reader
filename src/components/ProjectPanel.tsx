@@ -224,14 +224,13 @@ function QuickDocs({ title, icon, docs, activeId, onOpen, onContextMenu }: { tit
 
 function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onConfigure, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onConfigure: (projectId: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
   const [projectOpen, setProjectOpen] = useState(false);
-  const [rootDropActive, setRootDropActive] = useState(false);
   const revealHere = project.files.some((doc) => doc.id === revealDocId);
   const showProject = forceOpen || projectOpen || revealHere;
   useEffect(() => { if (revealHere) setProjectOpen(true); }, [revealHere, revealRequest]);
 
   return (
-    <section data-zdocs-drop-project={project.id} data-folder-path="" className={`project ${rootDropActive ? "root-drop-active" : ""}`} onDragOver={(event) => { const payload = event.dataTransfer.getData("application/x-zdocs-entry"); if (payload) { try { if ((JSON.parse(payload) as { projectId: string }).projectId !== project.id) return; } catch { return; } } else if (!event.dataTransfer.types.includes("application/x-zdocs-path")) return; event.preventDefault(); event.dataTransfer.dropEffect = "move"; setRootDropActive(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setRootDropActive(false); }} onDrop={(event) => { setRootDropActive(false); const payload = event.dataTransfer.getData("application/x-zdocs-entry"); let source = event.dataTransfer.getData("application/x-zdocs-path"); if (payload) { try { const entry = JSON.parse(payload) as { projectId: string; path: string }; if (entry.projectId !== project.id) return; source = entry.path; } catch { return; } } if (source) { event.preventDefault(); onMoveEntry(source, ""); } }}>
-      <div className="project-title">
+    <section className="project">
+      <div className="project-title" data-zdocs-drop-project={project.id} data-folder-path="">
         <button className="collapse-button project-collapse" type="button" aria-expanded={showProject} onClick={() => setProjectOpen((value) => !value)} onContextMenu={(event) => onFolderContextMenu(event, "", project.name)}>
           {showProject ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <strong>{project.name}</strong>

@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Eye, FileCode2, FolderTree, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
-import { forwardRef, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { copyText, getProjectFile, openExternalLink, readNativeAsset, resolveRelativePath, savePastedImage } from "../file-system";
 import { parseMarkdown } from "../markdown";
@@ -7,6 +7,8 @@ import type { DocFile, DocsProject, ViewMode } from "../types";
 import type { EditorCommand, EditorCommandType } from "./MarkdownEditor";
 
 const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
+const MIN_IMAGE_SCALE = .1;
+const MAX_IMAGE_SCALE = 10;
 
 interface ReaderProps {
   doc?: DocFile;
@@ -119,15 +121,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
   useEffect(() => { imageScaleRef.current = imageScale; }, [imageScale]);
   useEffect(() => localStorage.setItem("zdocs:reading-settings", JSON.stringify(reading)), [reading]);
   useEffect(() => { setOutlineCollapsed(mode === "source"); }, [mode]);
-  useEffect(() => {
-    if (!doc || !previewRef.current) return;
-    const pane = previewRef.current;
-    const key = `zdocs:scroll:${doc.id}:preview`;
-    window.setTimeout(() => { pane.scrollTop = Number(localStorage.getItem(key)) || 0; }, 0);
-    const save = () => localStorage.setItem(key, String(pane.scrollTop));
-    pane.addEventListener("scroll", save, { passive: true });
-    return () => { save(); pane.removeEventListener("scroll", save); };
-  }, [doc?.id, mode]);
+  useLayoutEffect(() => { setPreviewHtml(rendered.html); }, [doc?.id, rendered.html]);
   useEffect(() => {
     const pane = previewRef.current;
     if (!pane || !rendered.headings.length) return;
@@ -139,8 +133,8 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
     if (!imageViewer) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setImageViewer(undefined);
-      if (event.key === "+" || event.key === "=") setImageScale((scale) => Math.min(5, scale + .25));
-      if (event.key === "-") setImageScale((scale) => Math.max(.25, scale - .25));
+      if (event.key === "+" || event.key === "=") setImageScale((scale) => Math.min(MAX_IMAGE_SCALE, scale + .25));
+      if (event.key === "-") setImageScale((scale) => Math.max(MIN_IMAGE_SCALE, scale - .25));
       if (event.key === "0") setImageScale(1);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -168,8 +162,8 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
     const stage = imageStageRef.current;
     const image = imageElementRef.current;
     const previous = imageScaleRef.current;
-    const bounded = Math.max(.25, Math.min(5, nextScale));
-    const next = bounded < .27 ? .25 : bounded > 4.98 ? 5 : bounded;
+    const bounded = Math.max(MIN_IMAGE_SCALE, Math.min(MAX_IMAGE_SCALE, nextScale));
+    const next = bounded < MIN_IMAGE_SCALE + .01 ? MIN_IMAGE_SCALE : bounded > MAX_IMAGE_SCALE - .02 ? MAX_IMAGE_SCALE : bounded;
     if (!stage || !image || next === previous) return;
     const stageRect = stage.getBoundingClientRect();
     const imageRect = image.getBoundingClientRect();
@@ -232,16 +226,16 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
       })()}
       {imageViewer && <div className="image-viewer" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setImageViewer(undefined)}>
         <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => zoomImageAt(imageScaleRef.current - .25)} disabled={imageScale <= .25} title="缩小"><ZoomOut size={17} /></button>
+          <button type="button" onClick={() => zoomImageAt(imageScaleRef.current - .25)} disabled={imageScale <= MIN_IMAGE_SCALE} title="缩小"><ZoomOut size={17} /></button>
           <span>{Math.round(imageScale * 100)}%</span>
-          <button type="button" onClick={() => zoomImageAt(imageScaleRef.current + .25)} disabled={imageScale >= 5} title="放大"><ZoomIn size={17} /></button>
+          <button type="button" onClick={() => zoomImageAt(imageScaleRef.current + .25)} disabled={imageScale >= MAX_IMAGE_SCALE} title="放大"><ZoomIn size={17} /></button>
           <button type="button" onClick={() => zoomImageAt(1)} title="恢复 100%"><RotateCcw size={16} /></button>
           <i />
           <button type="button" onClick={() => setImageViewer(undefined)} title="关闭 (Esc)"><X size={18} /></button>
         </div>
         <div ref={imageStageRef} className={`image-viewer-stage ${isImagePanning ? "is-panning" : ""}`} onClick={(event) => event.stopPropagation()} onWheel={(event) => { if (!(event.ctrlKey || event.metaKey)) return; event.preventDefault(); wheelDeltaRef.current += event.deltaY; if (wheelFrameRef.current) return; const x = event.clientX; const y = event.clientY; wheelFrameRef.current = requestAnimationFrame(() => { const delta = wheelDeltaRef.current; wheelDeltaRef.current = 0; wheelFrameRef.current = undefined; zoomImageAt(imageScaleRef.current * Math.exp(-delta * .008), x, y); }); }} onPointerDown={(event) => { if (event.button !== 0 || !imageStageRef.current) return; imagePan.current = { x: event.clientX, y: event.clientY, left: imageStageRef.current.scrollLeft, top: imageStageRef.current.scrollTop }; setIsImagePanning(true); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (!imagePan.current || !imageStageRef.current) return; const x = event.clientX; const y = event.clientY; if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current); panFrameRef.current = requestAnimationFrame(() => { if (!imagePan.current || !imageStageRef.current) return; imageStageRef.current.scrollLeft = imagePan.current.left - (x - imagePan.current.x); imageStageRef.current.scrollTop = imagePan.current.top - (y - imagePan.current.y); }); }} onPointerUp={(event) => { imagePan.current = undefined; setIsImagePanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { imagePan.current = undefined; setIsImagePanning(false); }}>
           <div className="image-viewer-canvas" style={imageSize ? { width: imageSize.width * imageScale, height: imageSize.height * imageScale } : undefined}>
-            <img ref={imageElementRef} src={imageViewer.src} alt={imageViewer.alt} style={imageSize ? { width: imageSize.width * imageScale, height: imageSize.height * imageScale } : undefined} onLoad={(event) => { const image = event.currentTarget; setImageSize({ width: image.naturalWidth || image.clientWidth, height: image.naturalHeight || image.clientHeight }); }} draggable={false} />
+            <img ref={imageElementRef} src={imageViewer.src} alt={imageViewer.alt} style={imageSize ? { width: imageSize.width * imageScale, height: imageSize.height * imageScale } : undefined} onLoad={(event) => { const image = event.currentTarget; setImageSize(readImageSize(imageViewer.src, image)); }} draggable={false} />
           </div>
         </div>
         {imageViewer.alt && <div className="image-viewer-caption">{imageViewer.alt}</div>}
@@ -278,8 +272,39 @@ function relativeDocPath(from: string, to: string) {
   return `${"../".repeat(fromParts.length)}${toParts.join("/")}`;
 }
 
+function readImageSize(src: string, image: HTMLImageElement) {
+  if (src.startsWith("data:image/svg+xml")) {
+    try {
+      const markup = decodeURIComponent(src.slice(src.indexOf(",") + 1));
+      const svg = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+      const viewBox = svg.getAttribute("viewBox")?.trim().split(/[ ,]+/).map(Number);
+      if (viewBox?.length === 4 && viewBox[2] > 0 && viewBox[3] > 0) return { width: viewBox[2], height: viewBox[3] };
+      const width = Number.parseFloat(svg.getAttribute("width") ?? "");
+      const height = Number.parseFloat(svg.getAttribute("height") ?? "");
+      if (width > 0 && height > 0) return { width, height };
+    } catch { /* Fall back to the browser-reported dimensions. */ }
+  }
+  return { width: image.naturalWidth || image.clientWidth, height: image.naturalHeight || image.clientHeight };
+}
+
 const Preview = forwardRef<HTMLDivElement, { html: string; doc: DocFile; project: DocsProject; onOpenDoc: (doc: DocFile) => void; onOpenImage: (src: string, alt: string) => void; onActivate: () => void }>(function Preview({ html, doc, project, onOpenDoc, onOpenImage, onActivate }, ref) {
-  return <div ref={ref} className="preview-pane" onPointerDown={onActivate}><article className="markdown-body" onClick={(event) => { const element = event.target as Element; if (element instanceof HTMLImageElement && !element.hasAttribute("data-missing")) { event.preventDefault(); onOpenImage(element.src, element.alt); return; } const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (diagram) { event.preventDefault(); const markup = new XMLSerializer().serializeToString(diagram); onOpenImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`, "Mermaid 流程图"); return; } const anchor = element.closest("a"); if (!anchor) return; const href = anchor.getAttribute("href")?.trim() ?? ""; if (!href || href.startsWith("#")) return; event.preventDefault(); const path = resolveRelativePath(doc.path, href); if (path && /\.md$/i.test(path)) { const target = project.files.find((file) => file.path === path); if (target) { onOpenDoc(target); return; } } if (/^(https?:|mailto:)/i.test(href)) void openExternalLink(href); }} dangerouslySetInnerHTML={{ __html: html }} /></div>;
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  const scrollKey = `zdocs:scroll:${doc.id}:preview`;
+  const setRefs = (node: HTMLDivElement | null) => {
+    paneRef.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) ref.current = node;
+  };
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const saved = Number(localStorage.getItem(scrollKey)) || 0;
+    let frame = requestAnimationFrame(() => { pane.scrollTop = saved; frame = requestAnimationFrame(() => { pane.scrollTop = saved; }); });
+    const save = () => localStorage.setItem(scrollKey, String(pane.scrollTop));
+    pane.addEventListener("scroll", save, { passive: true });
+    return () => { cancelAnimationFrame(frame); save(); pane.removeEventListener("scroll", save); };
+  }, [scrollKey]);
+  return <div ref={setRefs} className="preview-pane" onPointerDown={onActivate}><article className="markdown-body" onClick={(event) => { const element = event.target as Element; if (element instanceof HTMLImageElement && !element.hasAttribute("data-missing")) { event.preventDefault(); onOpenImage(element.src, element.alt); return; } const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (diagram) { event.preventDefault(); const markup = new XMLSerializer().serializeToString(diagram); onOpenImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`, "Mermaid 流程图"); return; } const anchor = element.closest("a"); if (!anchor) return; const href = anchor.getAttribute("href")?.trim() ?? ""; if (!href || href.startsWith("#")) return; event.preventDefault(); const path = resolveRelativePath(doc.path, href); if (path && /\.md$/i.test(path)) { const target = project.files.find((file) => file.path === path); if (target) { onOpenDoc(target); return; } } if (/^(https?:|mailto:)/i.test(href)) void openExternalLink(href); }} dangerouslySetInnerHTML={{ __html: html }} /></div>;
 });
 
 function buildPreviewSearchHtml(html: string, query: string, activeIndex: number) {
