@@ -156,6 +156,8 @@ body.is-entry-dragging { cursor: grabbing; user-select: none; }
 .tab-context-menu button:hover:not(:disabled), .tab-context-menu button:focus-visible:not(:disabled) { outline: none; background: #e8e6df; color: #242520; }
 .tab-context-menu button:disabled { color: #aaa9a3; cursor: default; }
 .tab-context-menu button.separated { height: 40px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
+.image-context-menu { z-index: 560; width: 166px; }
+.image-context-menu button { gap: 9px; }
 .topbar { height: 51px; flex: 0 0 51px; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 22px; border-bottom: 1px solid var(--line); }
 .history-actions { display: flex; gap: 2px; }
 .history-actions button { width: 26px; height: 27px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #777870; cursor: pointer; }

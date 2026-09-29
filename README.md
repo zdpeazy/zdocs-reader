@@ -4,7 +4,7 @@
 
 ## 下载安装
 
-[下载 ZDocs v0.1.35（macOS Apple Silicon）](https://github.com/zdpeazy/zdocs-reader/releases/download/v0.1.35/ZDocs_0.1.35_aarch64.dmg)
+[下载 ZDocs v0.1.36（macOS Apple Silicon）](https://github.com/zdpeazy/zdocs-reader/releases/download/v0.1.36/ZDocs_0.1.36_aarch64.dmg)
 
 也可以前往 [Releases 页面](https://github.com/zdpeazy/zdocs-reader/releases) 查看所有版本。
 

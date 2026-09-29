@@ -28,6 +28,32 @@ type PendingDialog =
   | { kind: "shortcuts" };
 type UpdateInfo = { version: string; url: string; fileName: string };
 
+async function svgToPng(svg: Blob) {
+  const url = URL.createObjectURL(svg);
+  try {
+    const markup = await svg.text();
+    const root = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+    const viewBox = root.getAttribute("viewBox")?.trim().split(/[ ,]+/).map(Number);
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const width = Math.max(1, viewBox?.length === 4 && viewBox.every(Number.isFinite) ? viewBox[2] : image.naturalWidth || 1600);
+    const height = Math.max(1, viewBox?.length === 4 && viewBox.every(Number.isFinite) ? viewBox[3] : image.naturalHeight || 900);
+    const scale = Math.min(2, 8192 / width, 8192 / height, Math.sqrt(32_000_000 / (width * height)));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("无法创建图片画布");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG 生成失败")), "image/png"));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function readStoredList(key: string) {
   try { return JSON.parse(localStorage.getItem(key) ?? "[]") as string[]; } catch { return []; }
 }
@@ -598,17 +624,19 @@ export default function App() {
     try {
       const response = await fetch(src);
       if (!response.ok) throw new Error("图片读取失败");
-      const blob = await response.blob();
-      const mime = blob.type || src.match(/^data:([^;,]+)/)?.[1] || "image/png";
+      const originalBlob = await response.blob();
+      const mime = (originalBlob.type || src.match(/^data:([^;,]+)/)?.[1] || "image/png").split(";")[0].toLowerCase();
+      const isSvg = mime === "image/svg+xml";
       const extensions: Record<string, string> = {
         "image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
         "image/webp": "webp", "image/bmp": "bmp", "image/avif": "avif",
       };
-      const extension = extensions[mime] || "png";
+      const extension = isSvg ? "png" : extensions[mime] || "png";
       const baseName = (alt || "图片").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\.[a-z0-9]+$/i, "").trim().slice(0, 80) || "图片";
 
       if (!isDesktop()) {
-        const url = URL.createObjectURL(blob);
+        const downloadBlob = isSvg ? await svgToPng(originalBlob) : originalBlob;
+        const url = URL.createObjectURL(downloadBlob);
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = `${baseName}.${extension}`;
@@ -620,10 +648,14 @@ export default function App() {
       const outputPath = await showSaveDialog({
         title: "保存图片",
         defaultPath: `${baseName}.${extension}`,
-        filters: [{ name: `${extension.toUpperCase()} 图片`, extensions: [extension] }],
+        filters: isSvg
+          ? [{ name: "PNG 图片（推荐）", extensions: ["png"] }, { name: "SVG 矢量图", extensions: ["svg"] }]
+          : [{ name: `${extension.toUpperCase()} 图片`, extensions: [extension] }],
       });
       if (!outputPath) return;
-      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const saveAsSvg = isSvg && outputPath.toLowerCase().endsWith(".svg");
+      const outputBlob = isSvg && !saveAsSvg ? await svgToPng(originalBlob) : originalBlob;
+      const bytes = new Uint8Array(await outputBlob.arrayBuffer());
       let binary = "";
       for (let offset = 0; offset < bytes.length; offset += 0x8000) {
         binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
