@@ -952,6 +952,7 @@ function formatExportHtml(article: HTMLElement) {
     properties.forEach((property) => target.style.setProperty(property, computed.getPropertyValue(property)));
     target.removeAttribute("class");
   });
+  clone.querySelectorAll("[data-html2canvas-ignore]").forEach((element) => element.remove());
   return clone.innerHTML;
 }
 

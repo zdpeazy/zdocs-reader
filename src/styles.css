@@ -234,6 +234,12 @@ body.is-entry-dragging { cursor: grabbing; user-select: none; }
 .markdown-body code { font-family: "DM Mono", monospace; font-size: .86em; background: #ecebe6; padding: 2px 5px; border-radius: 4px; }
 .markdown-body pre { max-width: 100%; overflow-x: auto; background: #292a27; color: #e7e6df; padding: 18px 20px; border-radius: 8px; box-shadow: 0 7px 20px #2222; }
 .markdown-body pre code { background: transparent; padding: 0; }
+.preview-code-block { position: relative; }
+.markdown-body .preview-code-block pre { padding-top: 48px; }
+.code-copy-button { position: absolute; top: 9px; right: 10px; padding: 4px 9px; border: 1px solid #ffffff30; border-radius: 5px; background: #323532; color: #e7e6df; font: 11px/1.5 system-ui, sans-serif; cursor: pointer; }
+.code-copy-button:hover { background: #454945; }
+.code-copy-button:focus-visible { outline: 2px solid #b5c8e2; outline-offset: 2px; }
+@media print { .code-copy-button { display: none; } }
 .markdown-body blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding: 2px 18px; color: #6f7069; background: #f2eee8; }
 .markdown-body table { width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; }
 .markdown-body th, .markdown-body td { overflow-wrap: anywhere; border: 1px solid #dad9d3; padding: 8px 10px; text-align: left; }

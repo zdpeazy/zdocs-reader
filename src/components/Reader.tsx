@@ -303,6 +303,52 @@ function readImageSize(src: string, image: HTMLImageElement) {
 const Preview = forwardRef<HTMLDivElement, { html: string; doc: DocFile; project: DocsProject; onOpenDoc: (doc: DocFile) => void; onOpenImage: (src: string, alt: string) => void; onSaveImage: (src: string, alt: string, x: number, y: number) => void; onActivate: () => void }>(function Preview({ html, doc, project, onOpenDoc, onOpenImage, onSaveImage, onActivate }, ref) {
   const paneRef = useRef<HTMLDivElement | null>(null);
   const scrollKey = `zdocs:scroll:${doc.id}:preview`;
+  const codeHtml = useMemo(() => {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    parsed.querySelectorAll("pre").forEach((pre) => {
+      const code = pre.querySelector("code");
+      if (!code) return;
+      const wrapper = document.createElement("div");
+      wrapper.className = "preview-code-block";
+      pre.before(wrapper);
+      wrapper.append(pre);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "code-copy-button";
+      button.textContent = "复制代码";
+      button.setAttribute("aria-label", "复制代码");
+      button.setAttribute("aria-live", "polite");
+      button.setAttribute("data-html2canvas-ignore", "true");
+      wrapper.append(button);
+    });
+    return { __html: parsed.body.innerHTML };
+  }, [html]);
+  useEffect(() => {
+    const pane = paneRef.current;
+    const timers = new Set<number>();
+    let disposed = false;
+    const copy = async (event: MouseEvent) => {
+        const button = (event.target as Element).closest<HTMLButtonElement>(".code-copy-button");
+        const code = button?.parentElement?.querySelector("pre code");
+        if (!button || !code) return;
+        event.preventDefault();
+        event.stopPropagation();
+        button.disabled = true;
+        try {
+          await copyText(code.textContent ?? "");
+          if (!disposed) button.textContent = "已复制 ✓";
+        } catch {
+          if (!disposed) button.textContent = "复制失败，请重试";
+        } finally {
+          if (!disposed) {
+            const timer = window.setTimeout(() => { button.textContent = "复制代码"; button.disabled = false; timers.delete(timer); }, 1800);
+            timers.add(timer);
+          }
+        }
+      };
+    pane?.addEventListener("click", copy);
+    return () => { disposed = true; timers.forEach(window.clearTimeout); pane?.removeEventListener("click", copy); };
+  }, []);
   const setRefs = (node: HTMLDivElement | null) => {
     paneRef.current = node;
     if (typeof ref === "function") ref(node);
@@ -317,7 +363,7 @@ const Preview = forwardRef<HTMLDivElement, { html: string; doc: DocFile; project
     pane.addEventListener("scroll", save, { passive: true });
     return () => { cancelAnimationFrame(frame); save(); pane.removeEventListener("scroll", save); };
   }, [scrollKey]);
-  return <div ref={setRefs} className="preview-pane" onPointerDown={onActivate}><article className="markdown-body" onContextMenu={(event) => { const element = event.target as Element; const image = element instanceof HTMLImageElement && !element.hasAttribute("data-missing") ? element : undefined; const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (!image && !diagram) return; event.preventDefault(); const src = image?.src ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(diagram!))}`; onSaveImage(src, image?.alt || "Mermaid 流程图", event.clientX, event.clientY); }} onClick={(event) => { const element = event.target as Element; if (element instanceof HTMLImageElement && !element.hasAttribute("data-missing")) { event.preventDefault(); onOpenImage(element.src, element.alt); return; } const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (diagram) { event.preventDefault(); const markup = new XMLSerializer().serializeToString(diagram); onOpenImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`, "Mermaid 流程图"); return; } const anchor = element.closest("a"); if (!anchor) return; const href = anchor.getAttribute("href")?.trim() ?? ""; if (!href || href.startsWith("#")) return; event.preventDefault(); const path = resolveRelativePath(doc.path, href); if (path && /\.md$/i.test(path)) { const target = project.files.find((file) => file.path === path); if (target) { onOpenDoc(target); return; } } if (/^(https?:|mailto:)/i.test(href)) void openExternalLink(href); }} dangerouslySetInnerHTML={{ __html: html }} /></div>;
+return <div ref={setRefs} className="preview-pane" onPointerDown={onActivate}><article className="markdown-body" onContextMenu={(event) => { const element = event.target as Element; const image = element instanceof HTMLImageElement && !element.hasAttribute("data-missing") ? element : undefined; const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (!image && !diagram) return; event.preventDefault(); const src = image?.src ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(diagram!))}`; onSaveImage(src, image?.alt || "Mermaid 流程图", event.clientX, event.clientY); }} onClick={(event) => { const element = event.target as Element; if (element instanceof HTMLImageElement && !element.hasAttribute("data-missing")) { event.preventDefault(); onOpenImage(element.src, element.alt); return; } const diagram = element.closest(".mermaid-diagram svg") as SVGSVGElement | null; if (diagram) { event.preventDefault(); const markup = new XMLSerializer().serializeToString(diagram); onOpenImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`, "Mermaid 流程图"); return; } const anchor = element.closest("a"); if (!anchor) return; const href = anchor.getAttribute("href")?.trim() ?? ""; if (!href || href.startsWith("#")) return; event.preventDefault(); const path = resolveRelativePath(doc.path, href); if (path && /\.md$/i.test(path)) { const target = project.files.find((file) => file.path === path); if (target) { onOpenDoc(target); return; } } if (/^(https?:|mailto:)/i.test(href)) void openExternalLink(href); }} dangerouslySetInnerHTML={codeHtml} /></div>;
 });
 
 function buildPreviewSearchHtml(html: string, query: string, activeIndex: number) {
