@@ -196,6 +196,10 @@ export function writePdfFile(outputPath: string, base64Data: string) {
   return invoke<string>("write_pdf_file", { outputPath, base64Data });
 }
 
+export function writeBinaryFile(outputPath: string, base64Data: string) {
+  return invoke<string>("write_binary_file", { outputPath, base64Data });
+}
+
 export function openExternalLink(url: string) {
   if (isDesktop()) return invoke<void>("open_external_link", { url });
   window.open(url, "_blank", "noopener,noreferrer");

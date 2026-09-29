@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Eye, FileCode2, FolderTree, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code, Columns2, Copy, Download, Eye, FileCode2, FolderTree, Focus, Heading2, ImagePlus, Italic, Link, ListTodo, RotateCcw, Save, Search, Settings2, Star, Table2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { forwardRef, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { copyText, getProjectFile, openExternalLink, readNativeAsset, resolveRelativePath, savePastedImage } from "../file-system";
@@ -31,9 +31,10 @@ interface ReaderProps {
   canGoBack: boolean;
   canGoForward: boolean;
   onNavigate: (direction: -1 | 1) => void;
+  onDownloadImage: (src: string, alt: string) => void;
 }
 
-export function Reader({ doc, project, source, mode, onModeChange, onSourceChange, onSave, isDirty, isSaving, isFavorite, onToggleFavorite, onOpenDoc, onRevealInTree, theme = "light", openDocs, onCloseTab, onCloseTabs, canGoBack, canGoForward, onNavigate }: ReaderProps) {
+export function Reader({ doc, project, source, mode, onModeChange, onSourceChange, onSave, isDirty, isSaving, isFavorite, onToggleFavorite, onOpenDoc, onRevealInTree, theme = "light", openDocs, onCloseTab, onCloseTabs, canGoBack, canGoForward, onNavigate, onDownloadImage }: ReaderProps) {
   const rendered = useMemo(() => parseMarkdown(source), [source]);
   const [previewHtml, setPreviewHtml] = useState(rendered.html);
   const [splitRatio, setSplitRatio] = useState(() => Number(localStorage.getItem("zdocs:split-ratio")) || 50);
@@ -231,6 +232,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
           <button type="button" onClick={() => zoomImageAt(imageScaleRef.current + .25)} disabled={imageScale >= MAX_IMAGE_SCALE} title="放大"><ZoomIn size={17} /></button>
           <button type="button" onClick={() => zoomImageAt(1)} title="恢复 100%"><RotateCcw size={16} /></button>
           <i />
+          <button type="button" onClick={() => onDownloadImage(imageViewer.src, imageViewer.alt)} title="下载图片"><Download size={17} /></button>
           <button type="button" onClick={() => setImageViewer(undefined)} title="关闭 (Esc)"><X size={18} /></button>
         </div>
         <div ref={imageStageRef} className={`image-viewer-stage ${isImagePanning ? "is-panning" : ""}`} onClick={(event) => event.stopPropagation()} onWheel={(event) => { if (!(event.ctrlKey || event.metaKey)) return; event.preventDefault(); wheelDeltaRef.current += event.deltaY; if (wheelFrameRef.current) return; const x = event.clientX; const y = event.clientY; wheelFrameRef.current = requestAnimationFrame(() => { const delta = wheelDeltaRef.current; wheelDeltaRef.current = 0; wheelFrameRef.current = undefined; zoomImageAt(imageScaleRef.current * Math.exp(-delta * .008), x, y); }); }} onPointerDown={(event) => { if (event.button !== 0 || !imageStageRef.current) return; imagePan.current = { x: event.clientX, y: event.clientY, left: imageStageRef.current.scrollLeft, top: imageStageRef.current.scrollTop }; setIsImagePanning(true); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (!imagePan.current || !imageStageRef.current) return; const x = event.clientX; const y = event.clientY; if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current); panFrameRef.current = requestAnimationFrame(() => { if (!imagePan.current || !imageStageRef.current) return; imageStageRef.current.scrollLeft = imagePan.current.left - (x - imagePan.current.x); imageStageRef.current.scrollTop = imagePan.current.top - (y - imagePan.current.y); }); }} onPointerUp={(event) => { imagePan.current = undefined; setIsImagePanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { imagePan.current = undefined; setIsImagePanning(false); }}>

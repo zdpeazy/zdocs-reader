@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
 import { QuickOpen } from "./components/QuickOpen";
-import { copyAbsolutePath, createProjectDoc, createProjectEntry, exportDocument, hasReadPermission, installUpdate, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeDoc, writePdfFile } from "./file-system";
+import { copyAbsolutePath, createProjectDoc, createProjectEntry, exportDocument, hasReadPermission, installUpdate, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeBinaryFile, writeDoc, writePdfFile } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -60,11 +61,22 @@ export default function App() {
   const [trashedEntry, setTrashedEntry] = useState<{ projectId: string; path: string; trashPath: string }>();
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo>();
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number>();
   const [sidebarDropActive, setSidebarDropActive] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
   const projectsRef = useRef<DocsProject[]>([]);
 
   useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<{ downloaded: number; total?: number; percent?: number }>("update-download-progress", (event) => {
+      if (!disposed) setUpdateProgress(event.payload.percent);
+    }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; });
+    return () => { disposed = true; stop?.(); };
+  }, []);
 
   useEffect(() => localStorage.setItem("zdocs:view-mode", mode), [mode]);
   useEffect(() => localStorage.setItem("zdocs:sidebar-width", String(sidebarWidth)), [sidebarWidth]);
@@ -262,11 +274,13 @@ export default function App() {
     if (source !== savedSource && !(await saveActiveDoc())) return;
     setDialog(undefined);
     setIsDownloadingUpdate(true);
+    setUpdateProgress(0);
     setNotice(`正在下载 ZDocs v${availableUpdate.version}，完成后将自动重启…`);
     try {
       await installUpdate(availableUpdate.url, availableUpdate.fileName);
     } catch (error) {
       setIsDownloadingUpdate(false);
+      setUpdateProgress(undefined);
       setNotice(error instanceof Error ? error.message : "自动更新失败");
     }
   }
@@ -580,6 +594,48 @@ export default function App() {
     }, 1200);
   }
 
+  async function downloadImage(src: string, alt: string) {
+    try {
+      const response = await fetch(src);
+      if (!response.ok) throw new Error("图片读取失败");
+      const blob = await response.blob();
+      const mime = blob.type || src.match(/^data:([^;,]+)/)?.[1] || "image/png";
+      const extensions: Record<string, string> = {
+        "image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+        "image/webp": "webp", "image/bmp": "bmp", "image/avif": "avif",
+      };
+      const extension = extensions[mime] || "png";
+      const baseName = (alt || "图片").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\.[a-z0-9]+$/i, "").trim().slice(0, 80) || "图片";
+
+      if (!isDesktop()) {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `${baseName}.${extension}`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      const outputPath = await showSaveDialog({
+        title: "保存图片",
+        defaultPath: `${baseName}.${extension}`,
+        filters: [{ name: `${extension.toUpperCase()} 图片`, extensions: [extension] }],
+      });
+      if (!outputPath) return;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      const savedPath = await writeBinaryFile(outputPath, btoa(binary));
+      setNotice(`图片已保存到 ${savedPath}`);
+      window.setTimeout(() => setNotice(undefined), 3500);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "图片下载失败");
+    }
+  }
+
   function requestExport(doc: DocFile, format: "pdf" | "docx") {
     if (doc.id !== activeDoc?.id && source !== savedSource) {
       setDialog({ kind: "unsaved", action: { type: "export", doc, format } });
@@ -774,7 +830,7 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} projectDropActive={sidebarDropActive} onProjectDropActiveChange={setSidebarDropActive} onBrowserProjectDrop={addProjectsFromHandles} availableUpdate={availableUpdate} isUpdating={isDownloadingUpdate} onRequestUpdate={() => setDialog({ kind: "update-confirm" })} />
+      <ProjectPanel width={sidebarWidth} collapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} projects={projects} activeId={activeDoc?.id} revealTarget={treeReveal} onAdd={addProject} onOpen={openDoc} onRemove={requestRemoveProject} onRestore={restoreProject} onRefresh={refreshProjects} onReorder={reorderProjects} onConfigure={configureProjectVisibility} onDocAction={handleDocAction} onCreateEntry={requestCreateEntry} onDeleteFolder={(projectId, path, name) => setDialog({ kind: "delete-entry", projectId, path, name, entryType: "folder" })} onRenameFolder={(projectId, path, name) => { setRenameValue(name); setDialog({ kind: "rename-folder", projectId, path, name }); }} temporaryFolderKeys={temporaryFolderKeys} onMoveEntry={moveEntry} favoriteIds={favoriteIds} recentIds={recentIds} theme={theme} onToggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} onShowShortcuts={() => setDialog({ kind: "shortcuts" })} onOpenLark={() => setLarkOpen(true)} projectDropActive={sidebarDropActive} onProjectDropActiveChange={setSidebarDropActive} onBrowserProjectDrop={addProjectsFromHandles} availableUpdate={availableUpdate} isUpdating={isDownloadingUpdate} updateProgress={updateProgress} onRequestUpdate={() => setDialog({ kind: "update-confirm" })} />
       <div
         className={`sidebar-resizer ${sidebarCollapsed ? "hidden" : ""}`}
         role="separator"
@@ -794,7 +850,7 @@ export default function App() {
           if (event.key === "ArrowRight") setSidebarWidth((value) => Math.min(520, value + 10));
         }}
       />
-      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} onRevealInTree={revealDocInTree} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} />
+      <Reader doc={activeDoc} project={activeProject} source={source} mode={mode} onModeChange={changeViewMode} onSourceChange={setSource} onSave={saveActiveDoc} isDirty={source !== savedSource} isSaving={isSaving} isFavorite={Boolean(activeDoc && favoriteIds.includes(activeDoc.id))} onToggleFavorite={toggleFavorite} onOpenDoc={openDoc} onRevealInTree={revealDocInTree} theme={theme} openDocs={openDocs} onCloseTab={closeTab} onCloseTabs={closeTabs} canGoBack={navigation.index > 0} canGoForward={navigation.index >= 0 && navigation.index < navigation.ids.length - 1} onNavigate={navigateHistory} onDownloadImage={(src, alt) => void downloadImage(src, alt)} />
       {quickOpen && <QuickOpen projects={projects} onOpen={openDoc} onClose={() => setQuickOpen(false)} />}
       {notice && <div className="toast" role="alert"><span>{notice}</span>{trashedEntry && <button className="toast-action" type="button" onClick={() => void undoTrash()}>撤销</button>}<button type="button" onClick={() => { setNotice(undefined); setTrashedEntry(undefined); }}>×</button></div>}
       {!supportsDirectoryPicker() && !isDesktop() && <div className="browser-warning">请使用 Chrome 或 Edge 打开，以授权读取本地项目目录。</div>}

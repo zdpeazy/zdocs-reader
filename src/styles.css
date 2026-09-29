@@ -125,15 +125,17 @@ body.is-entry-dragging { cursor: grabbing; user-select: none; }
 .doc-context-menu button.danger:hover, .doc-context-menu button.danger:focus-visible { background: #f8e5e2; color: #992c24; }
 .doc-context-menu button:nth-last-child(2) { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; }
 .sidebar-update { padding: 8px 9px; border-top: 1px solid var(--line); }
-.sidebar-update > button { width: 100%; min-width: 0; min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 6px 7px; border: 1px solid #347d6842; border-radius: 9px; background: #347d680c; color: #286653; text-align: left; cursor: pointer; }
+.sidebar-update > button { position: relative; width: 100%; min-width: 0; min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 6px 7px 9px; overflow: hidden; border: 1px solid #347d6842; border-radius: 9px; background: #347d680c; color: #286653; text-align: left; cursor: pointer; }
 .sidebar-update > button:hover { border-color: #347d6875; background: #347d6816; }
-.sidebar-update > button:disabled { opacity: .65; cursor: wait; }
+.sidebar-update > button:disabled { opacity: 1; cursor: wait; }
 .sidebar-update-icon { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 7px; background: #347d6819; }
 .sidebar-update > button > span:nth-child(2) { min-width: 0; flex: 1; }
 .sidebar-update strong, .sidebar-update small { display: block; white-space: nowrap; }
 .sidebar-update strong { overflow: hidden; text-overflow: ellipsis; font-size: 10px; font-weight: 600; }
 .sidebar-update small { margin-top: 2px; color: #718078; font-size: 8px; }
 .sidebar-update b { flex: 0 0 auto; padding: 5px 7px; border-radius: 6px; background: #347d68; color: #fff; font-size: 9px; font-weight: 600; }
+.sidebar-update-progress { position: absolute; right: 7px; bottom: 4px; left: 7px; height: 2px; overflow: hidden; border-radius: 2px; background: #347d6818; }
+.sidebar-update-progress span { display: block; height: 100%; border-radius: inherit; background: #347d68; transition: width .15s ease-out; }
 .sidebar-update.compact { padding: 7px 6px; }
 .sidebar-update.compact > button { min-height: 38px; justify-content: center; padding: 4px; }
 .sidebar-update.compact .sidebar-update-icon { width: 27px; height: 27px; flex-basis: 27px; }
@@ -557,6 +559,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #347d6866; outlin
 .theme-dark .sidebar-update-icon { background: #79b9a419; }
 .theme-dark .sidebar-update small { color: #8fa59c; }
 .theme-dark .sidebar-update b { background: #79b9a4; color: #17251f; }
+.theme-dark .sidebar-update-progress { background: #79b9a41c; }
+.theme-dark .sidebar-update-progress span { background: #79b9a4; }
 .theme-dark .sidebar-project-drop-overlay { border-color: #79b9a4; background: #202824f2; color: #c4e2d7; box-shadow: 0 14px 38px #0006, inset 0 0 0 4px #79b9a408; }
 .theme-dark .sidebar-project-drop-overlay > span { background: #79b9a418; color: #9bd0be; }
 .theme-dark .sidebar-project-drop-overlay small { color: #93a59e; }

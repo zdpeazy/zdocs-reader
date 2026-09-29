@@ -4,10 +4,19 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+use tauri::Emitter;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateDownloadProgress {
+    downloaded: u64,
+    total: Option<u64>,
+    percent: Option<f64>,
+}
 
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -53,8 +62,12 @@ fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<Nativ
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if current == root && visible_directories.is_some_and(|directories| !path.is_dir() || !directories.contains(&name)) { continue; }
-        if path.is_dir() && IGNORED.contains(&name.as_str()) { continue; }
+        if current == root && visible_directories.is_some_and(|directories| !path.is_dir() || !directories.contains(&name)) {
+            continue;
+        }
+        if path.is_dir() && IGNORED.contains(&name.as_str()) {
+            continue;
+        }
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/");
         if path.is_dir() {
             let children = scan_dir(root, &path, project_id, files, visible_directories)?;
@@ -111,7 +124,10 @@ fn create_markdown(root_path: String, relative_path: String, content: String) ->
     let extension = requested.extension().and_then(|value| value.to_str()).unwrap_or("md");
     let mut target = requested.clone();
     let mut index = 1;
-    while target.exists() { target = parent.join(format!("{} ({}).{}", stem, index, extension)); index += 1; }
+    while target.exists() {
+        target = parent.join(format!("{} ({}).{}", stem, index, extension));
+        index += 1;
+    }
     fs::write(&target, content).map_err(|error| error.to_string())?;
     Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
 }
@@ -124,27 +140,43 @@ fn create_project_entry(root_path: String, folder_path: String, name: String, ki
         return Err("名称无效，请勿包含路径分隔符".into());
     }
     let parent = root.join(&folder_path).canonicalize().map_err(|error| error.to_string())?;
-    if !parent.starts_with(&root) { return Err("目标目录超出项目范围".into()); }
+    if !parent.starts_with(&root) {
+        return Err("目标目录超出项目范围".into());
+    }
     let final_name = if kind == "file" && !clean_name.to_lowercase().ends_with(".md") { format!("{}.md", clean_name) } else { clean_name.to_string() };
     let target = parent.join(&final_name);
-    if target.exists() { return Err("同名文件或文件夹已经存在".into()); }
-    if kind == "folder" { fs::create_dir(&target).map_err(|error| error.to_string())?; }
-    else if kind == "file" { fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|error| error.to_string())?; }
-    else { return Err("不支持的创建类型".into()); }
+    if target.exists() {
+        return Err("同名文件或文件夹已经存在".into());
+    }
+    if kind == "folder" {
+        fs::create_dir(&target).map_err(|error| error.to_string())?;
+    } else if kind == "file" {
+        fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|error| error.to_string())?;
+    } else {
+        return Err("不支持的创建类型".into());
+    }
     Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
 }
 
 #[tauri::command]
 fn delete_project_entry(root_path: String, relative_path: String, kind: String) -> Result<(), String> {
-    if relative_path.trim().is_empty() { return Err("不能删除项目根目录".into()); }
+    if relative_path.trim().is_empty() {
+        return Err("不能删除项目根目录".into());
+    }
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let target = root.join(relative_path).canonicalize().map_err(|error| error.to_string())?;
-    if target == root || !target.starts_with(&root) { return Err("删除目标超出项目范围".into()); }
+    if target == root || !target.starts_with(&root) {
+        return Err("删除目标超出项目范围".into());
+    }
     if kind == "folder" {
-        if !target.is_dir() { return Err("目标不是文件夹".into()); }
+        if !target.is_dir() {
+            return Err("目标不是文件夹".into());
+        }
         fs::remove_dir_all(target).map_err(|error| error.to_string())
     } else if kind == "file" {
-        if !target.is_file() { return Err("目标不是文件".into()); }
+        if !target.is_file() {
+            return Err("目标不是文件".into());
+        }
         fs::remove_file(target).map_err(|error| error.to_string())
     } else {
         Err("不支持的删除类型".into())
@@ -154,12 +186,18 @@ fn delete_project_entry(root_path: String, relative_path: String, kind: String) 
 #[tauri::command]
 fn rename_project_folder(root_path: String, folder_path: String, new_name: String) -> Result<String, String> {
     let clean_name = new_name.trim();
-    if clean_name.is_empty() || clean_name == "." || clean_name == ".." || clean_name.contains('/') || clean_name.contains('\\') { return Err("文件夹名称无效，请勿包含路径分隔符".into()); }
+    if clean_name.is_empty() || clean_name == "." || clean_name == ".." || clean_name.contains('/') || clean_name.contains('\\') {
+        return Err("文件夹名称无效，请勿包含路径分隔符".into());
+    }
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let source = root.join(&folder_path).canonicalize().map_err(|error| error.to_string())?;
-    if source == root || !source.starts_with(&root) || !source.is_dir() { return Err("无法重命名该文件夹".into()); }
+    if source == root || !source.starts_with(&root) || !source.is_dir() {
+        return Err("无法重命名该文件夹".into());
+    }
     let target = source.parent().ok_or("无法定位上级目录")?.join(clean_name);
-    if target.exists() && target != source { return Err("同名文件或文件夹已经存在".into()); }
+    if target.exists() && target != source {
+        return Err("同名文件或文件夹已经存在".into());
+    }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
     Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
 }
@@ -169,10 +207,16 @@ fn move_project_entry(root_path: String, source_path: String, target_folder: Str
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let source = root.join(&source_path).canonicalize().map_err(|error| error.to_string())?;
     let destination = root.join(&target_folder).canonicalize().map_err(|error| error.to_string())?;
-    if source == root || !source.starts_with(&root) || !destination.starts_with(&root) || !destination.is_dir() { return Err("移动路径超出项目范围".into()); }
-    if source.is_dir() && destination.starts_with(&source) { return Err("不能将文件夹移动到自身内部".into()); }
+    if source == root || !source.starts_with(&root) || !destination.starts_with(&root) || !destination.is_dir() {
+        return Err("移动路径超出项目范围".into());
+    }
+    if source.is_dir() && destination.starts_with(&source) {
+        return Err("不能将文件夹移动到自身内部".into());
+    }
     let target = destination.join(source.file_name().ok_or("无法读取名称")?);
-    if target.exists() { return Err("目标文件夹中存在同名项目".into()); }
+    if target.exists() {
+        return Err("目标文件夹中存在同名项目".into());
+    }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
     Ok(target.strip_prefix(&root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/"))
 }
@@ -181,13 +225,18 @@ fn move_project_entry(root_path: String, source_path: String, target_folder: Str
 fn trash_project_entry(root_path: String, relative_path: String) -> Result<String, String> {
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let source = root.join(&relative_path).canonicalize().map_err(|error| error.to_string())?;
-    if source == root || !source.starts_with(&root) { return Err("删除目标超出项目范围".into()); }
+    if source == root || !source.starts_with(&root) {
+        return Err("删除目标超出项目范围".into());
+    }
     let trash = PathBuf::from(std::env::var("HOME").map_err(|_| "无法定位用户目录")?).join(".Trash");
     fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
     let name = source.file_name().and_then(|value| value.to_str()).ok_or("无法读取名称")?;
     let mut target = trash.join(name);
     let mut index = 1;
-    while target.exists() { target = trash.join(format!("{} {}", name, index)); index += 1; }
+    while target.exists() {
+        target = trash.join(format!("{} {}", name, index));
+        index += 1;
+    }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
     Ok(target.to_string_lossy().to_string())
 }
@@ -197,11 +246,17 @@ fn restore_trashed_entry(root_path: String, relative_path: String, trash_path: S
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let trash_root = PathBuf::from(std::env::var("HOME").map_err(|_| "无法定位用户目录")?).join(".Trash").canonicalize().map_err(|error| error.to_string())?;
     let source = PathBuf::from(trash_path).canonicalize().map_err(|error| error.to_string())?;
-    if !source.starts_with(&trash_root) { return Err("恢复来源不是废纸篓".into()); }
+    if !source.starts_with(&trash_root) {
+        return Err("恢复来源不是废纸篓".into());
+    }
     let target = root.join(relative_path);
-    if target.exists() { return Err("原位置已存在同名项目".into()); }
+    if target.exists() {
+        return Err("原位置已存在同名项目".into());
+    }
     let parent = target.parent().ok_or("无法定位原目录")?;
-    if !parent.exists() || !parent.canonicalize().map_err(|error| error.to_string())?.starts_with(&root) { return Err("原目录已经不存在".into()); }
+    if !parent.exists() || !parent.canonicalize().map_err(|error| error.to_string())?.starts_with(&root) {
+        return Err("原目录已经不存在".into());
+    }
     fs::rename(source, target).map_err(|error| error.to_string())
 }
 
@@ -209,7 +264,9 @@ fn restore_trashed_entry(root_path: String, relative_path: String, trash_path: S
 fn save_pasted_image(root_path: String, document_path: String, file_name: String, base64_data: String) -> Result<String, String> {
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let document = root.join(document_path).canonicalize().map_err(|error| error.to_string())?;
-    if !document.starts_with(&root) || !document.is_file() { return Err("文档路径超出项目范围".into()); }
+    if !document.starts_with(&root) || !document.is_file() {
+        return Err("文档路径超出项目范围".into());
+    }
     let assets = document.parent().ok_or("无法定位文档目录")?.join("assets");
     fs::create_dir_all(&assets).map_err(|error| error.to_string())?;
     let raw_name = PathBuf::from(file_name);
@@ -218,7 +275,10 @@ fn save_pasted_image(root_path: String, document_path: String, file_name: String
     let safe_stem: String = stem.chars().map(|value| if value.is_alphanumeric() || value == '-' || value == '_' { value } else { '-' }).collect();
     let mut target = assets.join(format!("{}.{}", safe_stem, extension));
     let mut index = 1;
-    while target.exists() { target = assets.join(format!("{}-{}.{}", safe_stem, index, extension)); index += 1; }
+    while target.exists() {
+        target = assets.join(format!("{}-{}.{}", safe_stem, index, extension));
+        index += 1;
+    }
     let data = STANDARD.decode(base64_data).map_err(|error| format!("图片数据无效：{}", error))?;
     fs::write(&target, data).map_err(|error| error.to_string())?;
     Ok(format!("assets/{}", target.file_name().and_then(|value| value.to_str()).ok_or("图片名称无效")?))
@@ -228,8 +288,17 @@ fn save_pasted_image(root_path: String, document_path: String, file_name: String
 fn read_asset(root_path: String, relative_path: String) -> Result<String, String> {
     let root = PathBuf::from(root_path).canonicalize().map_err(|error| error.to_string())?;
     let path = root.join(relative_path).canonicalize().map_err(|error| error.to_string())?;
-    if !path.starts_with(&root) { return Err("资源路径超出项目目录".into()); }
-    let mime = match path.extension().and_then(|value| value.to_str()).unwrap_or("").to_lowercase().as_str() { "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", "svg" => "image/svg+xml", _ => "application/octet-stream" };
+    if !path.starts_with(&root) {
+        return Err("资源路径超出项目目录".into());
+    }
+    let mime = match path.extension().and_then(|value| value.to_str()).unwrap_or("").to_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
     let data = fs::read(path).map_err(|error| error.to_string())?;
     Ok(format!("data:{};base64,{}", mime, STANDARD.encode(data)))
 }
@@ -240,7 +309,11 @@ fn copy_text(content: String) -> Result<(), String> {
     child.stdin.as_mut().ok_or("无法访问系统剪贴板")?.write_all(content.as_bytes()).map_err(|error| error.to_string())?;
     drop(child.stdin.take());
     let status = child.wait().map_err(|error| error.to_string())?;
-    if status.success() { Ok(()) } else { Err("复制源码失败".into()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("复制源码失败".into())
+    }
 }
 
 #[tauri::command]
@@ -253,7 +326,11 @@ fn copy_path(path: String) -> Result<(), String> {
 fn reveal_in_finder(path: String) -> Result<(), String> {
     let path = PathBuf::from(path).canonicalize().map_err(|error| error.to_string())?;
     let status = Command::new("open").arg("-R").arg(path).status().map_err(|error| error.to_string())?;
-    if status.success() { Ok(()) } else { Err("无法在 Finder 中定位文件".into()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("无法在 Finder 中定位文件".into())
+    }
 }
 
 #[tauri::command]
@@ -263,15 +340,20 @@ fn rename_markdown(path: String, new_name: String) -> Result<String, String> {
     if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
         return Err("文件名无效，请勿包含路径分隔符".into());
     }
-    if !name.to_lowercase().ends_with(".md") { name.push_str(".md"); }
+    if !name.to_lowercase().ends_with(".md") {
+        name.push_str(".md");
+    }
     let target = source.parent().ok_or("无法定位文件目录")?.join(name);
-    if target.exists() && target != source { return Err("同名文件已存在".into()); }
+    if target.exists() && target != source {
+        return Err("同名文件已存在".into());
+    }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
     Ok(target.to_string_lossy().to_string())
 }
 
 fn html_document(title: &str, body: &str) -> String {
-    format!(r#"<!doctype html><html><head><meta charset="utf-8"><title>{}</title><style>
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title>{}</title><style>
 @page {{ size: A4; margin: 18mm 17mm; }}
 body {{ margin: 0; color: #262722; font: 14px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }}
 article {{ max-width: 820px; margin: 0 auto; }}
@@ -280,11 +362,16 @@ pre {{ overflow-wrap: anywhere; white-space: pre-wrap; padding: 14px; border-rad
 blockquote {{ margin-left: 0; padding-left: 14px; border-left: 3px solid #d9613c; color: #666; }}
 table {{ width: 100%; border-collapse: collapse; }} th, td {{ padding: 7px 9px; border: 1px solid #d8d8d2; text-align: left; }}
 img, svg {{ max-width: 100%; height: auto; }} a {{ color: #b54829; }} pre, table, img, svg {{ break-inside: avoid; }}
-</style></head><body><article>{}</article></body></html>"#, title.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"), body)
+</style></head><body><article>{}</article></body></html>"#,
+        title.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        body
+    )
 }
 
 fn export_document_blocking(output_path: String, format: String, title: String, html: String) -> Result<String, String> {
-    if format != "docx" { return Err("该命令仅用于 Word 文档导出".into()); }
+    if format != "docx" {
+        return Err("该命令仅用于 Word 文档导出".into());
+    }
     let mut output = PathBuf::from(output_path);
     if output.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case("docx")).unwrap_or(true) {
         output.set_extension("docx");
@@ -295,15 +382,15 @@ fn export_document_blocking(output_path: String, format: String, title: String, 
     let result = Command::new("/usr/bin/textutil").args(["-convert", "docx", "-output"]).arg(&output).arg(&temp).status();
     let _ = fs::remove_file(&temp);
     let status = result.map_err(|error| error.to_string())?;
-    if !status.success() || !output.exists() { return Err("文档生成失败，请检查保存位置权限".into()); }
+    if !status.success() || !output.exists() {
+        return Err("文档生成失败，请检查保存位置权限".into());
+    }
     Ok(output.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 async fn export_document(output_path: String, format: String, title: String, html: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || export_document_blocking(output_path, format, title, html))
-        .await
-        .map_err(|error| format!("导出任务执行失败：{}", error))?
+    tauri::async_runtime::spawn_blocking(move || export_document_blocking(output_path, format, title, html)).await.map_err(|error| format!("导出任务执行失败：{}", error))?
 }
 
 #[tauri::command]
@@ -318,19 +405,43 @@ fn write_pdf_file(output_path: String, base64_data: String) -> Result<String, St
 }
 
 #[tauri::command]
+fn write_binary_file(output_path: String, base64_data: String) -> Result<String, String> {
+    let data = STANDARD.decode(base64_data).map_err(|error| format!("文件数据无效：{}", error))?;
+    fs::write(&output_path, data).map_err(|error| format!("文件保存失败：{}", error))?;
+    Ok(output_path)
+}
+
+#[tauri::command]
 async fn install_update(app: tauri::AppHandle, url: String, file_name: String) -> Result<String, String> {
     if !url.starts_with("https://github.com/zdpeazy/zdocs-reader/releases/download/") || !file_name.ends_with(".dmg") || file_name.contains('/') || file_name.contains('\\') {
         return Err("更新下载地址无效".into());
     }
     let app_bundle = std::env::current_exe().map_err(|error| error.to_string())?.ancestors().find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("app"))).map(Path::to_path_buf).ok_or("无法定位当前应用")?;
     let app_pid = std::process::id().to_string();
+    let progress_app = app.clone();
     let helper = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let home = std::env::var("HOME").map(PathBuf::from).map_err(|_| "无法定位用户目录")?;
         let downloads = home.join("Downloads");
         fs::create_dir_all(&downloads).map_err(|error| error.to_string())?;
         let target = downloads.join(file_name);
-        let status = Command::new("/usr/bin/curl").args(["--location", "--fail", "--silent", "--show-error"]).arg("--output").arg(&target).arg(url).status().map_err(|error| error.to_string())?;
-        if !status.success() { return Err("更新包下载失败".into()); }
+        let mut response = reqwest::blocking::Client::builder().user_agent("ZDocs updater").build().map_err(|error| error.to_string())?.get(url).send().map_err(|error| format!("更新包下载失败：{}", error))?.error_for_status().map_err(|error| format!("更新包下载失败：{}", error))?;
+        let total = response.content_length();
+        let mut output = fs::File::create(&target).map_err(|error| format!("无法保存更新包：{}", error))?;
+        let mut buffer = [0u8; 64 * 1024];
+        let mut downloaded = 0u64;
+        let _ = progress_app.emit("update-download-progress", UpdateDownloadProgress { downloaded, total, percent: total.map(|size| if size > 0 { 0.0 } else { 100.0 }) });
+        loop {
+            let count = response.read(&mut buffer).map_err(|error| format!("更新包下载失败：{}", error))?;
+            if count == 0 {
+                break;
+            }
+            output.write_all(&buffer[..count]).map_err(|error| format!("更新包保存失败：{}", error))?;
+            downloaded += count as u64;
+            let percent = total.filter(|size| *size > 0).map(|size| (downloaded as f64 / size as f64 * 100.0).min(100.0));
+            let _ = progress_app.emit("update-download-progress", UpdateDownloadProgress { downloaded, total, percent });
+        }
+        output.flush().map_err(|error| format!("更新包保存失败：{}", error))?;
+        let _ = progress_app.emit("update-download-progress", UpdateDownloadProgress { downloaded, total, percent: Some(100.0) });
         let script_path = std::env::temp_dir().join(format!("zdocs-update-{}.sh", app_pid));
         let log_path = std::env::temp_dir().join("zdocs-update.log");
         let script = r#"#!/bin/sh
@@ -361,12 +472,19 @@ fi
 "#;
         fs::write(&script_path, script).map_err(|error| format!("无法创建更新助手：{}", error))?;
         let chmod = Command::new("/bin/chmod").args(["700"]).arg(&script_path).status().map_err(|error| error.to_string())?;
-        if !chmod.success() { return Err("无法启动更新助手".into()); }
+        if !chmod.success() {
+            return Err("无法启动更新助手".into());
+        }
         Command::new("/bin/sh").arg(&script_path).arg(&target).arg(&app_bundle).arg(&app_pid).arg(&log_path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("更新助手启动失败：{}", error))?;
         Ok(target.to_string_lossy().to_string())
-    }).await.map_err(|error| format!("更新任务执行失败：{}", error))??;
+    })
+    .await
+    .map_err(|error| format!("更新任务执行失败：{}", error))??;
     let app_to_close = app.clone();
-    std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(350)); app_to_close.exit(0); });
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        app_to_close.exit(0);
+    });
     Ok(helper)
 }
 
@@ -377,34 +495,53 @@ fn open_external_link(url: String) -> Result<(), String> {
         return Err("仅支持打开 http、https 或邮件链接".into());
     }
     let status = Command::new("open").arg(normalized).status().map_err(|error| error.to_string())?;
-    if status.success() { Ok(()) } else { Err("无法使用系统默认浏览器打开链接".into()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("无法使用系统默认浏览器打开链接".into())
+    }
 }
 
 fn lark_binary() -> Result<PathBuf, String> {
     if let Ok(output) = Command::new("which").arg("lark-cli").output() {
-        if output.status.success() { return Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())); }
+        if output.status.success() {
+            return Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()));
+        }
     }
     let home = std::env::var("HOME").map(PathBuf::from).map_err(|_| "无法定位用户目录")?;
     let versions = home.join(".nvm/versions/node");
     if let Ok(entries) = fs::read_dir(versions) {
-        for entry in entries.flatten() { let candidate = entry.path().join("bin/lark-cli"); if candidate.exists() { return Ok(candidate); } }
+        for entry in entries.flatten() {
+            let candidate = entry.path().join("bin/lark-cli");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
     }
     Err("未找到 lark-cli，请先安装并配置飞书 CLI".into())
 }
 
 fn run_lark(args: &[&str], input: Option<&str>) -> Result<Value, String> {
     let mut child = Command::new(lark_binary()?).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|error| error.to_string())?;
-    if let Some(content) = input { child.stdin.as_mut().ok_or("无法写入飞书命令")?.write_all(content.as_bytes()).map_err(|error| error.to_string())?; }
+    if let Some(content) = input {
+        child.stdin.as_mut().ok_or("无法写入飞书命令")?.write_all(content.as_bytes()).map_err(|error| error.to_string())?;
+    }
     let output = child.wait_with_output().map_err(|error| error.to_string())?;
     let value: Value = serde_json::from_slice(&output.stdout).map_err(|_| String::from_utf8_lossy(&output.stderr).to_string())?;
-    if !output.status.success() || value.get("ok") != Some(&Value::Bool(true)) { return Err(value.pointer("/error/message").and_then(Value::as_str).unwrap_or("飞书命令执行失败").into()); }
+    if !output.status.success() || value.get("ok") != Some(&Value::Bool(true)) {
+        return Err(value.pointer("/error/message").and_then(Value::as_str).unwrap_or("飞书命令执行失败").into());
+    }
     Ok(value)
 }
 
-fn doc_data(value: &Value) -> Value { value.pointer("/data/document").cloned().unwrap_or_else(|| json!({})) }
+fn doc_data(value: &Value) -> Value {
+    value.pointer("/data/document").cloned().unwrap_or_else(|| json!({}))
+}
 
 #[tauri::command]
-fn lark_status() -> Result<Value, String> { run_lark(&["auth", "status", "--json"], None) }
+fn lark_status() -> Result<Value, String> {
+    run_lark(&["auth", "status", "--json"], None)
+}
 
 #[tauri::command]
 fn lark_import(url: String) -> Result<Value, String> {
@@ -415,7 +552,11 @@ fn lark_import(url: String) -> Result<Value, String> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PublishInput { title: String, content: String, doc_url: Option<String> }
+struct PublishInput {
+    title: String,
+    content: String,
+    doc_url: Option<String>,
+}
 
 #[tauri::command]
 fn lark_publish(input: PublishInput) -> Result<Value, String> {
@@ -423,14 +564,18 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
         run_lark(&["docs", "+fetch", "--as", "user", "--doc", url, "--doc-format", "markdown", "--detail", "with-ids"], None)?;
         let updated = run_lark(&["docs", "+update", "--as", "user", "--doc", url, "--command", "overwrite", "--doc-format", "markdown", "--content", "-"], Some(&input.content))?;
         let verified = run_lark(&["docs", "+fetch", "--as", "user", "--doc", url, "--doc-format", "markdown", "--detail", "simple"], None)?;
-        let mut document = doc_data(&verified); document["url"] = Value::String(url.into());
+        let mut document = doc_data(&verified);
+        document["url"] = Value::String(url.into());
         (document, updated.pointer("/data/warnings").cloned().unwrap_or_else(|| json!([])))
     } else {
         let created = run_lark(&["docs", "+create", "--as", "user", "--title", &input.title, "--doc-format", "markdown", "--content", "-"], Some(&input.content))?;
         let created_doc = doc_data(&created);
         let target = created_doc.get("url").or_else(|| created_doc.get("document_id")).and_then(Value::as_str).ok_or("飞书未返回文档地址")?;
         let verified = run_lark(&["docs", "+fetch", "--as", "user", "--doc", target, "--doc-format", "markdown", "--detail", "simple"], None)?;
-        let mut document = doc_data(&verified); if let Some(url) = created_doc.get("url") { document["url"] = url.clone(); }
+        let mut document = doc_data(&verified);
+        if let Some(url) = created_doc.get("url") {
+            document["url"] = url.clone();
+        }
         (document, created.pointer("/data/warnings").cloned().unwrap_or_else(|| json!([])))
     };
     Ok(json!({ "ok": true, "document": { "token": document.get("document_id"), "revision": document.get("revision_id"), "url": document.get("url") }, "warnings": warnings }))
@@ -438,9 +583,5 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, install_update, open_external_link, lark_status, lark_import, lark_publish])
-        .run(tauri::generate_context!())
-        .expect("error while running ZDocs");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, write_binary_file, install_update, open_external_link, lark_status, lark_import, lark_publish]).run(tauri::generate_context!()).expect("error while running ZDocs");
 }

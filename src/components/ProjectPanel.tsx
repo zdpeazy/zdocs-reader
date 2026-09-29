@@ -35,10 +35,11 @@ interface ProjectPanelProps {
   onBrowserProjectDrop: (handles: FileSystemDirectoryHandle[]) => void;
   availableUpdate?: { version: string };
   isUpdating: boolean;
+  updateProgress?: number;
   onRequestUpdate: () => void;
 }
 
-export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark, projectDropActive, onProjectDropActiveChange, onBrowserProjectDrop, availableUpdate, isUpdating, onRequestUpdate }: ProjectPanelProps) {
+export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, onOpen, onRemove, onRestore, onRefresh, onReorder, onConfigure, collapsed, onToggleCollapsed, onDocAction, onCreateEntry, onDeleteFolder, onRenameFolder, temporaryFolderKeys, onMoveEntry, favoriteIds, recentIds, theme, onToggleTheme, onShowShortcuts, onOpenLark, projectDropActive, onProjectDropActiveChange, onBrowserProjectDrop, availableUpdate, isUpdating, updateProgress, onRequestUpdate }: ProjectPanelProps) {
   const [query, setQuery] = useState("");
   const [contentMatches, setContentMatches] = useState<Set<string>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -197,7 +198,7 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
         )}
       </div>
       </>}
-      {availableUpdate && <div className={`sidebar-update ${collapsed ? "compact" : ""}`}><button type="button" disabled={isUpdating} onClick={onRequestUpdate} title={`更新到 ZDocs v${availableUpdate.version}`} aria-label={`立即更新到版本 ${availableUpdate.version}`}><span className="sidebar-update-icon"><Download size={15} /></span>{!collapsed && <><span><strong>新版本 v{availableUpdate.version}</strong><small>{isUpdating ? "正在下载更新…" : "已准备好更新"}</small></span><b>{isUpdating ? "下载中" : "立即更新"}</b></>}</button></div>}
+      {availableUpdate && <div className={`sidebar-update ${collapsed ? "compact" : ""}`}><button type="button" disabled={isUpdating} onClick={onRequestUpdate} title={isUpdating ? `正在下载 ${Math.round(updateProgress ?? 0)}%` : `更新到 ZDocs v${availableUpdate.version}`} aria-label={`立即更新到版本 ${availableUpdate.version}`}><span className="sidebar-update-icon"><Download size={15} /></span>{!collapsed && <><span><strong>新版本 v{availableUpdate.version}</strong><small>{isUpdating ? updateProgress === undefined ? "正在下载更新…" : `已下载 ${Math.round(updateProgress)}%` : "已准备好更新"}</small></span><b>{isUpdating ? updateProgress === undefined ? "下载中" : `${Math.round(updateProgress)}%` : "立即更新"}</b></>}{isUpdating && <i className="sidebar-update-progress"><span style={{ width: `${Math.max(0, Math.min(100, updateProgress ?? 0))}%` }} /></i>}</button></div>}
       <div className="sidebar-footer">
         {!collapsed && <span className="local-status"><span className="status-dot" />本地模式</span>}
         <div className="sidebar-footer-actions">
@@ -210,7 +211,6 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
         { action: "copy-path" as const, label: "复制绝对路径", icon: <Copy size={15} /> },
         { action: "rename" as const, label: "重命名", icon: <Pencil size={15} /> },
         { action: "export-pdf" as const, label: "导出 PDF…", icon: <FileOutput size={15} /> },
-        { action: "export-docx" as const, label: "导出 Word…", icon: <FileOutput size={15} /> },
         { action: "delete" as const, label: "删除文档", icon: <Trash2 size={15} /> },
       ].map((item) => <button key={item.action} type="button" role="menuitem" onClick={() => { onDocAction(item.action, contextMenu.doc); setContextMenu(undefined); }}>{item.icon}<span>{item.label}</span></button>)}</div>}
       {folderMenu && <div className="doc-context-menu folder-context-menu" role="menu" aria-label={`${folderMenu.name} 文件夹操作`} style={{ left: folderMenu.x, top: folderMenu.y }} onPointerDown={(event) => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { onCreateEntry(folderMenu.projectId, folderMenu.path, "file"); setFolderMenu(undefined); }}><FilePlus2 size={15} /><span>新建 Markdown</span></button><button type="button" role="menuitem" onClick={() => { onCreateEntry(folderMenu.projectId, folderMenu.path, "folder"); setFolderMenu(undefined); }}><FolderPlus size={15} /><span>新建文件夹</span></button>{folderMenu.path && <><button type="button" role="menuitem" onClick={() => { onRenameFolder(folderMenu.projectId, folderMenu.path, folderMenu.name); setFolderMenu(undefined); }}><Pencil size={15} /><span>重命名文件夹</span></button><button className="danger" type="button" role="menuitem" onClick={() => { onDeleteFolder(folderMenu.projectId, folderMenu.path, folderMenu.name); setFolderMenu(undefined); }}><Trash2 size={15} /><span>删除文件夹</span></button></>}</div>}
