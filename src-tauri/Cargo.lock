@@ -4887,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "zdocs-reader"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "base64 0.22.1",
  "reqwest 0.12.28",
