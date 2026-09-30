@@ -63,9 +63,13 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
     setIsSearching(true);
     const timer = window.setTimeout(async () => {
       const matches = new Set<string>();
-      await Promise.all(allFiles.map(async (doc) => {
-        if (doc.path.toLowerCase().includes(normalized)) return;
-        try { if ((await readDoc(doc)).content.toLowerCase().includes(normalized)) matches.add(doc.id); } catch { /* permission state is shown separately */ }
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(4, allFiles.length) }, async () => {
+        while (!cancelled && next < allFiles.length) {
+          const doc = allFiles[next++];
+          if (doc.path.toLowerCase().includes(normalized)) continue;
+          try { if ((await readDoc(doc)).content.toLowerCase().includes(normalized)) matches.add(doc.id); } catch { /* inaccessible file */ }
+        }
       }));
       if (!cancelled) { setContentMatches(matches); setIsSearching(false); }
     }, 220);
@@ -225,7 +229,8 @@ function QuickDocs({ title, icon, docs, activeId, onOpen, onContextMenu }: { tit
 function ProjectTree({ project, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, onConfigure, onRemove, onRestore, forceOpen, onDragStart, onDragMove, onDragEnd }: { project: DocsProject; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (path: string) => void; onMoveEntry: (source: string, target: string) => void; onConfigure: (projectId: string) => void; onRemove: (projectId: string) => void; onRestore: (projectId: string) => void; forceOpen: boolean; onDragStart: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragMove: (event: React.PointerEvent<HTMLButtonElement>) => void; onDragEnd: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
   const [projectOpen, setProjectOpen] = useState(false);
   const revealHere = project.files.some((doc) => doc.id === revealDocId);
-  const showProject = forceOpen || projectOpen || revealHere;
+  const showProject = projectOpen;
+  useEffect(() => { if (forceOpen) setProjectOpen(true); }, [forceOpen]);
   useEffect(() => { if (revealHere) setProjectOpen(true); }, [revealHere, revealRequest]);
 
   return (

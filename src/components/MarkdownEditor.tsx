@@ -32,6 +32,8 @@ const markdownHighlight = HighlightStyle.define([
 export default function MarkdownEditor({ docId, value, onChange, theme, onScrollRatio, initialScrollRatio = 0, searchRequest = 0, command, pathSuggestions = [], headingSuggestions = [], onPasteImage }: { docId: string; value: string; onChange: (value: string) => void; theme: "light" | "dark"; onScrollRatio: (ratio: number) => void; initialScrollRatio?: number; searchRequest?: number; command?: EditorCommand; pathSuggestions?: string[]; headingSuggestions?: string[]; onPasteImage?: (file: File) => Promise<string> }) {
   const editor = useRef<EditorViewType | null>(null);
   const restoringScroll = useRef(true);
+  const completionValues = useRef({ pathSuggestions, headingSuggestions, onPasteImage });
+  completionValues.current = { pathSuggestions, headingSuggestions, onPasteImage };
   useEffect(() => { if (searchRequest && editor.current) { editor.current.focus(); openSearchPanel(editor.current); } }, [searchRequest]);
   useEffect(() => {
     const view = editor.current;
@@ -55,6 +57,7 @@ export default function MarkdownEditor({ docId, value, onChange, theme, onScroll
   }, [command]);
   const smartExtensions = useMemo(() => {
     const complete = (context: CompletionContext) => {
+      const { pathSuggestions, headingSuggestions } = completionValues.current;
       const before = context.state.sliceDoc(Math.max(0, context.pos - 160), context.pos);
       const word = context.matchBefore(/[\w./#-]*/);
       if (!word) return null;
@@ -63,6 +66,7 @@ export default function MarkdownEditor({ docId, value, onChange, theme, onScroll
       return null;
     };
     const paste = EditorView.domEventHandlers({ paste(event, view) {
+      const { onPasteImage } = completionValues.current;
       const image = Array.from(event.clipboardData?.files ?? []).find((file) => file.type.startsWith("image/"));
       if (!image || !onPasteImage) return false;
       event.preventDefault();
@@ -71,7 +75,7 @@ export default function MarkdownEditor({ docId, value, onChange, theme, onScroll
       return true;
     } });
     return [autocompletion({ override: [complete] }), paste];
-  }, [pathSuggestions, headingSuggestions, onPasteImage]);
-  const extensions = theme === "dark" ? [markdown(), EditorView.lineWrapping, ...smartExtensions] : [markdown(), EditorView.lineWrapping, lightEditorTheme, syntaxHighlighting(markdownHighlight), ...smartExtensions];
+  }, []);
+  const extensions = useMemo(() => theme === "dark" ? [markdown(), EditorView.lineWrapping, ...smartExtensions] : [markdown(), EditorView.lineWrapping, lightEditorTheme, syntaxHighlighting(markdownHighlight), ...smartExtensions], [theme, smartExtensions]);
   return <CodeMirror value={value} height="100%" extensions={extensions} theme={theme === "dark" ? oneDark : undefined} onCreateEditor={(view) => { editor.current = view; restoringScroll.current = true; requestAnimationFrame(() => { const max = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight; view.scrollDOM.scrollTop = max * initialScrollRatio; const cursor = Math.min(Number(localStorage.getItem(`zdocs:cursor:${docId}`)) || 0, view.state.doc.length); view.dispatch({ selection: { anchor: cursor }, scrollIntoView: initialScrollRatio === 0 }); requestAnimationFrame(() => { restoringScroll.current = false; }); }); }} onChange={onChange} onUpdate={(update) => { localStorage.setItem(`zdocs:cursor:${docId}`, String(update.state.selection.main.head)); if (restoringScroll.current) return; const scroller = update.view.scrollDOM; const max = scroller.scrollHeight - scroller.clientHeight; if (max > 0) onScrollRatio(scroller.scrollTop / max); }} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, bracketMatching: true, closeBrackets: true, autocompletion: false, searchKeymap: true, highlightSelectionMatches: true }} />;
 }

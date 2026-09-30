@@ -88,7 +88,7 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
     return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("resize", close); window.removeEventListener("keydown", onKeyDown); };
   }, [imageMenu]);
   useEffect(() => {
-    if (!doc || !project) return;
+    if (!doc || !project || mode === "source") return;
     let cancelled = false;
     const urls: string[] = [];
     const resolveAssets = async () => {
@@ -103,16 +103,20 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
           } else if (project.rootHandle) {
             const file = await (await getProjectFile(project.rootHandle, resolved)).getFile();
             const url = URL.createObjectURL(file);
+            if (cancelled) { URL.revokeObjectURL(url); return; }
             urls.push(url);
             image.setAttribute("src", url);
           }
         } catch { image.setAttribute("data-missing", "true"); }
       }));
       const diagrams = Array.from(parsed.querySelectorAll("pre code.language-mermaid"));
+      if (cancelled) return;
       if (diagrams.length) {
         const { default: mermaid } = await import("mermaid");
+        if (cancelled) return;
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default" });
-        await Promise.all(diagrams.map(async (code, index) => {
+        for (const [index, code] of diagrams.entries()) {
+          if (cancelled) return;
           try {
             const { svg } = await mermaid.render(`zdocs-mermaid-${Date.now()}-${index}`, code.textContent ?? "");
             const container = parsed.createElement("div");
@@ -120,13 +124,13 @@ export function Reader({ doc, project, source, mode, onModeChange, onSourceChang
             container.innerHTML = svg;
             code.parentElement?.replaceWith(container);
           } catch { code.parentElement?.classList.add("mermaid-error"); }
-        }));
+        }
       }
       if (!cancelled) setPreviewHtml(parsed.body.innerHTML);
     };
-    void resolveAssets();
-    return () => { cancelled = true; urls.forEach(URL.revokeObjectURL); };
-  }, [doc, project, rendered.html, theme]);
+    const timer = window.setTimeout(() => { void resolveAssets().catch(() => { if (!cancelled) setPreviewHtml(rendered.html); }); }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); urls.forEach(URL.revokeObjectURL); };
+  }, [doc, project, rendered.html, theme, mode]);
 
   useEffect(() => localStorage.setItem("zdocs:split-ratio", String(splitRatio)), [splitRatio]);
   useEffect(() => { imageScaleRef.current = imageScale; }, [imageScale]);
@@ -264,8 +268,8 @@ function ModeButton({ active, label, icon, onClick }: { active: boolean; label: 
 function SourceView({ doc, project, source, onChange, theme, previewRef, searchRequest, command, onCommand, onActivate }: { doc: DocFile; project: DocsProject; source: string; onChange: (source: string) => void; theme: "light" | "dark"; previewRef: React.RefObject<HTMLDivElement | null>; searchRequest: number; command?: EditorCommand; onCommand: (type: EditorCommandType) => void; onActivate: () => void }) {
   const lines = source.split(/\r?\n/).length;
   const scrollKey = `zdocs:scroll:${doc.id}:source`;
-  const suggestions = project.files.filter((item) => item.id !== doc.id).map((item) => relativeDocPath(doc.path, item.path));
-  const headings = parseMarkdown(source).headings.map((heading) => `#${heading.id}`);
+  const suggestions = useMemo(() => project.files.filter((item) => item.id !== doc.id).map((item) => relativeDocPath(doc.path, item.path)), [project.files, doc.id, doc.path]);
+  const headings = useMemo(() => parseMarkdown(source).headings.map((heading) => `#${heading.id}`), [source]);
   return <div className="source-pane" onPointerDown={onActivate}><div className="source-pane-header"><span className="source-language"><i />MARKDOWN</span><span className="source-hint">可编辑</span><span className="source-stats">{lines} 行 · UTF-8</span></div><EditorToolbar onCommand={onCommand} /><div className="editor-frame"><Suspense fallback={<div className="editor-loading">正在加载编辑器…</div>}><MarkdownEditor docId={doc.id} value={source} theme={theme} searchRequest={searchRequest} command={command} pathSuggestions={suggestions} headingSuggestions={headings} onPasteImage={(file) => savePastedImage(project, doc, file)} initialScrollRatio={Number(localStorage.getItem(scrollKey)) || 0} onChange={onChange} onScrollRatio={(ratio) => { localStorage.setItem(scrollKey, String(ratio)); if (previewRef.current) previewRef.current.scrollTop = ratio * (previewRef.current.scrollHeight - previewRef.current.clientHeight); }} /></Suspense></div></div>;
 }
 

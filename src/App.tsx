@@ -91,6 +91,11 @@ export default function App() {
   const [sidebarDropActive, setSidebarDropActive] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | undefined>(undefined);
   const projectsRef = useRef<DocsProject[]>([]);
+  const openRequest = useRef(0);
+
+  useEffect(() => {
+    if (activeDoc) setTreeReveal((current) => ({ docId: activeDoc.id, request: (current?.request ?? 0) + 1 }));
+  }, [activeDoc?.id]);
 
   useEffect(() => { projectsRef.current = projects; }, [projects]);
 
@@ -220,9 +225,15 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!activeDoc || source !== savedSource) return;
+    let cancelled = false;
+    let reading = false;
     const timer = window.setInterval(async () => {
+      if (reading) return;
+      reading = true;
+      const request = openRequest.current;
       try {
         const disk = await readDoc(activeDoc);
+        if (cancelled || request !== openRequest.current) return;
         if (disk.lastModified !== loadedLastModified) {
           setSource(disk.content);
           setSavedSource(disk.content);
@@ -231,8 +242,9 @@ export default function App() {
           window.setTimeout(() => setNotice(undefined), 1800);
         }
       } catch { /* permission recovery UI handles inaccessible projects */ }
+      finally { reading = false; }
     }, 2500);
-    return () => window.clearInterval(timer);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [activeDoc, source, savedSource, loadedLastModified]);
 
   async function addProject() {
@@ -312,8 +324,10 @@ export default function App() {
   }
 
   async function performOpenDoc(doc: DocFile, recordNavigation = true) {
+    const request = ++openRequest.current;
     try {
       const snapshot = await readDoc(doc);
+      if (request !== openRequest.current) return;
       setSource(snapshot.content);
       setSavedSource(snapshot.content);
       setLoadedLastModified(snapshot.lastModified);
@@ -330,12 +344,16 @@ export default function App() {
       localStorage.setItem("zdocs:last-doc", doc.id);
       setNotice(undefined);
     } catch {
-      setNotice("文档读取失败，请重新授权项目目录");
+      if (request === openRequest.current) setNotice("文档读取失败，请重新授权项目目录");
     }
   }
 
   function openDoc(doc: DocFile) {
-    if (doc.id === activeDoc?.id) return;
+    if (doc.id === activeDoc?.id) {
+      ++openRequest.current;
+      setTreeReveal((current) => ({ docId: doc.id, request: (current?.request ?? 0) + 1 }));
+      return;
+    }
     if (source !== savedSource) {
       setDialog({ kind: "unsaved", action: { type: "open", doc } });
       return;

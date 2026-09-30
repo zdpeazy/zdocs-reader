@@ -67,7 +67,7 @@ export function Tree({ projectId, nodes, activeId, revealDocId, revealRequest, o
     setDragPreview(undefined);
     pointerDrag.current = undefined;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (drag.dragging && targetFolder !== undefined && isValidTarget(drag.sourcePath, drag.type, targetFolder)) onMoveEntry(drag.sourcePath, targetFolder);
+    if (event.type !== "pointercancel" && drag.dragging && targetFolder !== undefined && isValidTarget(drag.sourcePath, drag.type, targetFolder)) onMoveEntry(drag.sourcePath, targetFolder);
     window.setTimeout(() => { suppressClick.current = false; }, 0);
   }
 
@@ -104,7 +104,7 @@ export function Tree({ projectId, nodes, activeId, revealDocId, revealRequest, o
 
 function FolderItem({ projectId, node, activeId, revealDocId, revealRequest, onOpen, onContextMenu, onFolderContextMenu, onCreateEntry, onMoveEntry, depth, isDragging, suppressClick, onPointerDown, onPointerMove, onPointerEnd }: { projectId: string; node: Extract<TreeNode, { type: "folder" }>; activeId?: string; revealDocId?: string; revealRequest?: number; onOpen: (doc: DocFile) => void; onContextMenu: (event: React.MouseEvent, doc: DocFile) => void; onFolderContextMenu: (event: React.MouseEvent, path: string, name: string) => void; onCreateEntry: (folderPath: string) => void; onMoveEntry: (sourcePath: string, targetFolder: string) => void; depth: number; isDragging: boolean; suppressClick: React.MutableRefObject<boolean>; onPointerDown: (event: React.PointerEvent<HTMLElement>) => void; onPointerMove: (event: React.PointerEvent<HTMLElement>) => void; onPointerEnd: (event: React.PointerEvent<HTMLElement>) => void }) {
   const [open, setOpen] = useState(false);
-  const containsReveal = node.children.some(function contains(child): boolean { return child.type === "file" ? child.doc.id === revealDocId : child.children.some(contains); });
+  const containsReveal = Boolean(revealDocId?.startsWith(`${projectId}:${node.path}/`));
   useEffect(() => { if (containsReveal) setOpen(true); }, [containsReveal, revealRequest]);
   return (
     <div>

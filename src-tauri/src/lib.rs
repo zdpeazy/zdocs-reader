@@ -61,6 +61,9 @@ fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<Nativ
     let entries = fs::read_dir(current).map_err(|error| error.to_string())?;
     for entry in entries.flatten() {
         let path = entry.path();
+        if path.is_dir() && entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(false) {
+            continue;
+        }
         let name = entry.file_name().to_string_lossy().to_string();
         if current == root && visible_directories.is_some_and(|directories| !path.is_dir() || !directories.contains(&name)) {
             continue;
@@ -87,7 +90,11 @@ fn scan_dir(root: &Path, current: &Path, project_id: &str, files: &mut Vec<Nativ
 }
 
 #[tauri::command]
-fn scan_project(root_path: String, project_id: String, visible_directories: Option<Vec<String>>) -> Result<NativeProject, String> {
+async fn scan_project(root_path: String, project_id: String, visible_directories: Option<Vec<String>>) -> Result<NativeProject, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_project_blocking(root_path, project_id, visible_directories)).await.map_err(|error| error.to_string())?
+}
+
+fn scan_project_blocking(root_path: String, project_id: String, visible_directories: Option<Vec<String>>) -> Result<NativeProject, String> {
     let root = PathBuf::from(&root_path).canonicalize().map_err(|error| error.to_string())?;
     let mut files = Vec::new();
     let visible_directories = visible_directories.unwrap_or_default();
@@ -102,9 +109,11 @@ fn modified_ms(path: &Path) -> u64 {
 }
 
 #[tauri::command]
-fn read_markdown(path: String) -> Result<FileSnapshot, String> {
+async fn read_markdown(path: String) -> Result<FileSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
     let path = PathBuf::from(path);
     Ok(FileSnapshot { content: fs::read_to_string(&path).map_err(|error| error.to_string())?, last_modified: modified_ms(&path) })
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
