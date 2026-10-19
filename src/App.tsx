@@ -9,7 +9,7 @@ import { Reader } from "./components/Reader";
 import { Dialog } from "./components/Dialog";
 import { LarkDialog } from "./components/LarkDialog";
 import { QuickOpen } from "./components/QuickOpen";
-import { copyAbsolutePath, createProjectDoc, createProjectEntry, exportDocument, hasReadPermission, installUpdate, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeBinaryFile, writeDoc, writePdfFile } from "./file-system";
+import { checkUpdate, copyAbsolutePath, createProjectDoc, createProjectEntry, exportDocument, hasReadPermission, installUpdate, isDesktop, moveProjectEntry, pickProject, projectFromHandle, projectFromPath, readDoc, renameMarkdown, renameProjectFolder, requestReadPermission, restoreTrashedEntry, revealInFinder, supportsDirectoryPicker, trashProjectEntry, writeBinaryFile, writeDoc, writePdfFile, type UpdateManifest } from "./file-system";
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
@@ -26,7 +26,6 @@ type PendingDialog =
   | { kind: "project-visibility"; projectId: string; projectName: string }
   | { kind: "update-confirm" }
   | { kind: "shortcuts" };
-type UpdateInfo = { version: string; url: string; fileName: string };
 
 async function svgToPng(svg: Blob) {
   const url = URL.createObjectURL(svg);
@@ -85,7 +84,7 @@ export default function App() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [navigation, setNavigation] = useState<{ ids: string[]; index: number }>({ ids: [], index: -1 });
   const [trashedEntry, setTrashedEntry] = useState<{ projectId: string; path: string; trashPath: string }>();
-  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo>();
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateManifest>();
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<number>();
   const [sidebarDropActive, setSidebarDropActive] = useState(false);
@@ -123,19 +122,15 @@ export default function App() {
     const check = async () => {
       try {
         const current = await getVersion();
-        const response = await fetch("https://api.github.com/repos/zdpeazy/zdocs-reader/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
-        if (!response.ok) return;
-        const release = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ name: string; browser_download_url: string }> };
-        const version = release.tag_name?.replace(/^v/i, "");
-        const asset = release.assets?.find((item) => /aarch64\.dmg$/i.test(item.name)) ?? release.assets?.find((item) => /\.dmg$/i.test(item.name));
-        if (!cancelled && version && asset && isNewerVersion(version, current)) {
-          setAvailableUpdate({ version, url: asset.browser_download_url, fileName: asset.name });
+        const manifest = await checkUpdate();
+        if (!cancelled && manifest && isNewerVersion(manifest.version, current)) {
+          setAvailableUpdate(manifest);
         }
       } catch { /* 离线时静默跳过，避免干扰本地阅读 */ }
     };
-    void check();
+    const firstCheck = window.setTimeout(() => void check(), 5000);
     const timer = window.setInterval(check, 6 * 60 * 60 * 1000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => { cancelled = true; window.clearTimeout(firstCheck); window.clearInterval(timer); };
   }, []);
   useEffect(() => {
     if (!isDesktop()) return;

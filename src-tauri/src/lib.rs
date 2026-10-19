@@ -18,6 +18,35 @@ struct UpdateDownloadProgress {
     percent: Option<f64>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateManifest {
+    version: String,
+    url: String,
+    file_name: String,
+}
+
+// 在独立线程拉取 GitHub 最新 release 信息，带 8 秒超时，避免断网时阻塞 WebView
+#[tauri::command]
+async fn check_update() -> Result<Option<UpdateManifest>, String> {
+    tauri::async_runtime::spawn_blocking(|| -> Result<Option<UpdateManifest>, String> {
+        let client = reqwest::blocking::Client::builder().user_agent("ZDocs updater").timeout(std::time::Duration::from_secs(8)).build().map_err(|error| error.to_string())?;
+        let release: Value = serde_json::from_str(&client.get("https://api.github.com/repos/zdpeazy/zdocs-reader/releases/latest").header("Accept", "application/vnd.github+json").send().map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.text().map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+        let version = release.get("tag_name").and_then(Value::as_str).map(|tag| tag.strip_prefix(['v', 'V']).unwrap_or(tag).to_string()).filter(|value| !value.is_empty());
+        let assets = release.get("assets").and_then(Value::as_array);
+        let find_asset = |suffix: &str| assets.and_then(|items| items.iter().find(|asset| asset.get("name").and_then(Value::as_str).is_some_and(|name| name.to_lowercase().ends_with(suffix))));
+        let asset = find_asset("aarch64.dmg").or_else(|| find_asset(".dmg"));
+        let url = asset.and_then(|item| item.get("browser_download_url")).and_then(Value::as_str);
+        let file_name = asset.and_then(|item| item.get("name")).and_then(Value::as_str);
+        match (version, url, file_name) {
+            (Some(version), Some(url), Some(file_name)) => Ok(Some(UpdateManifest { version, url: url.to_string(), file_name: file_name.to_string() })),
+            _ => Ok(None),
+        }
+    })
+    .await
+    .map_err(|error| format!("更新检查任务执行失败：{}", error))?
+}
+
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum TreeNode {
@@ -592,5 +621,5 @@ fn lark_publish(input: PublishInput) -> Result<Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, write_binary_file, install_update, open_external_link, lark_status, lark_import, lark_publish]).run(tauri::generate_context!()).expect("error while running ZDocs");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_project, read_markdown, write_markdown, create_markdown, create_project_entry, delete_project_entry, rename_project_folder, move_project_entry, trash_project_entry, restore_trashed_entry, save_pasted_image, read_asset, copy_text, copy_path, reveal_in_finder, rename_markdown, export_document, write_pdf_file, write_binary_file, check_update, install_update, open_external_link, lark_status, lark_import, lark_publish]).run(tauri::generate_context!()).expect("error while running ZDocs");
 }

@@ -211,6 +211,13 @@ export function installUpdate(url: string, fileName: string) {
   return invoke<string>("install_update", { url, fileName });
 }
 
+export type UpdateManifest = { version: string; url: string; fileName: string };
+
+export function checkUpdate() {
+  if (!isDesktop()) return Promise.resolve<UpdateManifest | null>(null);
+  return invoke<UpdateManifest | null>("check_update");
+}
+
 export async function createProjectEntry(project: DocsProject, folderPath: string, name: string, kind: "file" | "folder") {
   const cleanName = name.trim();
   if (!cleanName || cleanName === "." || cleanName === ".." || /[/\\]/.test(cleanName)) throw new Error("名称无效，请勿包含路径分隔符");
