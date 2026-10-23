@@ -624,4 +624,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #347d6866; outlin
   .markdown-body { max-width: none; color: #222 !important; }
   .markdown-body pre { break-inside: avoid; }
 }
-@media (max-width: 1120px) { .outline-panel { display: none; } .reader-grid { grid-template-columns: minmax(0, 1fr); } .reader-grid.mode-split { grid-template-columns: minmax(280px, 1fr) 5px minmax(280px, 1fr) !important; } }
+.reader-grid > .source-pane { grid-area: source; }
+.reader-grid > .preview-pane { grid-area: preview; }
+.reader-grid > .split-resizer { grid-area: split; }
+.reader-grid > .outline-panel { grid-area: outline; border-left: 0; }
+.outline-resizer { grid-area: resize; background: var(--line); cursor: col-resize; touch-action: none; user-select: none; }
+.outline-resizer:hover, .outline-resizer:focus-visible { background: var(--accent); }
+.outline-header { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.outline-header .outline-title { flex: 1; min-width: 0; width: auto; margin: 0; }
+.outline-header .outline-position { flex: 0 0 26px; width: 26px; display: grid; place-items: center; border: 0; border-radius: 4px; }
+.outline-position:hover { background: var(--line); }
+.outline-panel > button { white-space: normal; overflow-wrap: anywhere; }
+.outline-collapsed .outline-header { margin: 0; }
+@media print { .outline-resizer { display: none !important; } }
