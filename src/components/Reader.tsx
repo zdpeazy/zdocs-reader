@@ -425,7 +425,7 @@ function buildPreviewSearchHtml(html: string, query: string, activeIndex: number
 function Welcome() {
   return (
     <main className="welcome">
-      <div className="welcome-art"><span>Z</span><i /><i /><i /></div>
+      <div className="welcome-art"><img src="/zdocs-logo.png" alt="ZDocs" /></div>
       <p className="eyebrow">YOUR LOCAL KNOWLEDGE, ORGANIZED</p>
       <h1>让散落在项目里的文档<br />重新变得清晰。</h1>
       <p>添加项目目录，即可在一个地方阅读和编辑其中的所有 Markdown。默认看源码，需要时一键切换预览。</p>

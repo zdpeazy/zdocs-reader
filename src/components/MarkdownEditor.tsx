@@ -14,9 +14,9 @@ export type EditorCommand = { id: number; type: EditorCommandType };
 
 const lightEditorTheme = EditorView.theme({
   "&": { color: "#343630" },
-  ".cm-content": { caretColor: "#d9613c" },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#d9613c", borderLeftWidth: "2px" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "#d9613c25 !important" },
+  ".cm-content": { caretColor: "#60758e" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#60758e", borderLeftWidth: "2px" },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "#60758e25 !important" },
 });
 
 const markdownHighlight = HighlightStyle.define([
