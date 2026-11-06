@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Bold, Braces, Check, ChevronDown, ChevronLeft, C
 import { forwardRef, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { copyText, getProjectFile, openExternalLink, readNativeAsset, resolveRelativePath, savePastedImage } from "../file-system";
-import { parseMarkdown } from "../markdown";
+import { loadMathRendering, parseMarkdown } from "../markdown";
 import type { DocFile, DocsProject, ViewMode } from "../types";
 import type { EditorCommand, EditorCommandType } from "./MarkdownEditor";
 
@@ -35,7 +35,14 @@ interface ReaderProps {
 }
 
 export function Reader({ doc, project, source, mode, onModeChange, onSourceChange, onSave, isDirty, isSaving, isFavorite, onToggleFavorite, onOpenDoc, onRevealInTree, theme = "light", openDocs, onCloseTab, onCloseTabs, canGoBack, canGoForward, onNavigate, onDownloadImage }: ReaderProps) {
-  const rendered = useMemo(() => parseMarkdown(source), [source]);
+  const [mathRevision, setMathRevision] = useState(0);
+  useEffect(() => {
+    if (mode === "source" || !source.includes("$")) return;
+    let cancelled = false;
+    void loadMathRendering().then(() => { if (!cancelled) setMathRevision((value) => value + 1); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [mode, source]);
+  const rendered = useMemo(() => parseMarkdown(source), [source, mathRevision]);
   const [previewHtml, setPreviewHtml] = useState(rendered.html);
   const [splitRatio, setSplitRatio] = useState(() => Number(localStorage.getItem("zdocs:split-ratio")) || 50);
   const [copied, setCopied] = useState(false);

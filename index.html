@@ -7,7 +7,13 @@
     <title>ZDocs · 本地 Markdown 文档中心</title>
   </head>
   <body>
-    <div id="root"></div>
+    <style>
+      html, body { margin: 0; background: #f7f6f2; }
+      .boot-screen { height: 100vh; display: grid; place-content: center; gap: 12px; text-align: center; color: #60635f; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; }
+      .boot-screen strong { font-size: 24px; color: #30332f; }
+      @media (prefers-color-scheme: dark) { html, body { background: #202120; } .boot-screen { color: #b9bbb7; } .boot-screen strong { color: #eee; } }
+    </style>
+    <div id="root"><div class="boot-screen" role="status"><strong>ZDocs</strong><span>正在打开本地文档…</span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

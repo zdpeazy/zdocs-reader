@@ -1,7 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
-@import "katex/dist/katex.min.css";
 
-:root { color: #262722; background: #f7f6f2; font-family: Manrope, "Noto Sans SC", sans-serif; font-synthesis: none; --accent: #d9613c; --ink: #262722; --muted: #7c7d75; --line: #deddd7; --paper: #fbfaf7; }
+:root { color: #262722; background: #f7f6f2; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; font-synthesis: none; --accent: #d9613c; --ink: #262722; --muted: #7c7d75; --line: #deddd7; --paper: #fbfaf7; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 980px; min-height: 100vh; overflow: hidden; }
 button, input, textarea { font: inherit; }

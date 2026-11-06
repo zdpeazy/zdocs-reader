@@ -13,6 +13,7 @@ import { checkUpdate, copyAbsolutePath, createProjectDoc, createProjectEntry, ex
 import { loadLarkBindings, saveLarkBindings, type LarkBinding } from "./lark";
 import { forgetProject, loadStoredProjects, storeProject } from "./project-store";
 import type { DocFile, DocsProject, ViewMode } from "./types";
+import { readDocIfChanged } from "./file-system";
 
 type DeferredAction = { type: "open"; doc: DocFile } | { type: "remove"; projectId: string } | { type: "export"; doc: DocFile; format: "pdf" | "docx" };
 type PendingDialog =
@@ -169,22 +170,30 @@ export default function App() {
         return (aIndex < 0 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex < 0 ? Number.MAX_SAFE_INTEGER : bIndex);
       });
       const restored: DocsProject[] = [];
-      for (const item of stored) {
+      const lastDocId = localStorage.getItem("zdocs:last-doc");
+      const initialRequest = openRequest.current;
+      const queue = [...stored].sort((a, b) => Number(Boolean(lastDocId?.startsWith(`${b.id}:`))) - Number(Boolean(lastDocId?.startsWith(`${a.id}:`))));
+      for (const item of queue) {
+        if (cancelled) return;
         const visibleDirectories = item.visibleDirectories ?? [];
         if (item.rootPath) {
           try { restored.push(await projectFromPath(item.rootPath, item.id, visibleDirectories)); } catch { restored.push({ id: item.id, name: item.name, rootPath: item.rootPath, visibleDirectories, accessStatus: "needs-permission", tree: [], files: [] }); }
         } else if (item.rootHandle && await hasReadPermission(item.rootHandle)) {
-          restored.push(await projectFromHandle(item.rootHandle, item.id, visibleDirectories));
+          try { restored.push(await projectFromHandle(item.rootHandle, item.id, visibleDirectories)); }
+          catch { restored.push({ ...item, visibleDirectories, accessStatus: "needs-permission", tree: [], files: [] }); }
         } else if (item.rootHandle) {
           restored.push({ id: item.id, name: item.name, rootHandle: item.rootHandle, visibleDirectories, accessStatus: "needs-permission", tree: [], files: [] });
         }
+        if (cancelled) return;
+        const loaded = restored.find((project) => project.id === item.id);
+        if (!loaded) continue;
+        setProjects((current) => [...current.filter((project) => project.id !== loaded.id), loaded].sort((a, b) => stored.findIndex((entry) => entry.id === a.id) - stored.findIndex((entry) => entry.id === b.id)));
+        const lastDoc = loaded.files.find((doc) => doc.id === lastDocId);
+        if (lastDoc && openRequest.current === initialRequest) await performOpenDoc(lastDoc);
+        // Allow the restored project and document to paint before scanning the next project.
+        await new Promise((resolve) => window.setTimeout(resolve, 32));
       }
-      if (cancelled) return;
-      setProjects(restored);
-      const lastDocId = localStorage.getItem("zdocs:last-doc");
-      const lastDoc = restored.flatMap((project) => project.files).find((doc) => doc.id === lastDocId);
-      if (lastDoc) await openDoc(lastDoc);
-    }).catch(() => setNotice("项目记录恢复失败，请重新添加目录"));
+    }).catch(() => { if (!cancelled) setNotice("项目记录恢复失败，请重新添加目录"); });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
@@ -223,12 +232,12 @@ export default function App() {
     let cancelled = false;
     let reading = false;
     const timer = window.setInterval(async () => {
-      if (reading) return;
+      if (reading || document.visibilityState === "hidden") return;
       reading = true;
       const request = openRequest.current;
       try {
-        const disk = await readDoc(activeDoc);
-        if (cancelled || request !== openRequest.current) return;
+        const disk = await readDocIfChanged(activeDoc, loadedLastModified);
+        if (!disk || cancelled || request !== openRequest.current) return;
         if (disk.lastModified !== loadedLastModified) {
           setSource(disk.content);
           setSavedSource(disk.content);

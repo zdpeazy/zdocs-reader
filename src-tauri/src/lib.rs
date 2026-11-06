@@ -138,10 +138,12 @@ fn modified_ms(path: &Path) -> u64 {
 }
 
 #[tauri::command]
-async fn read_markdown(path: String) -> Result<FileSnapshot, String> {
+async fn read_markdown(path: String, known_modified: Option<u64>) -> Result<Option<FileSnapshot>, String> {
     tauri::async_runtime::spawn_blocking(move || {
     let path = PathBuf::from(path);
-    Ok(FileSnapshot { content: fs::read_to_string(&path).map_err(|error| error.to_string())?, last_modified: modified_ms(&path) })
+    let last_modified = modified_ms(&path);
+    if known_modified == Some(last_modified) && last_modified != 0 { return Ok(None); }
+    Ok(Some(FileSnapshot { content: fs::read_to_string(&path).map_err(|error| error.to_string())?, last_modified }))
     }).await.map_err(|error| error.to_string())?
 }
 

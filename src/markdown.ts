@@ -1,10 +1,14 @@
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import markedKatex from "marked-katex-extension";
 import type { Heading } from "./types";
 
 marked.setOptions({ gfm: true, breaks: false });
-marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+let mathReady: Promise<void> | undefined;
+export function loadMathRendering() {
+  return mathReady ??= Promise.all([import("marked-katex-extension"), import("katex/dist/katex.min.css")]).then(([{ default: markedKatex }]) => {
+    marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+  }).catch((error) => { mathReady = undefined; throw error; });
+}
 
 function slugify(text: string, used: Map<string, number>) {
   const base = text

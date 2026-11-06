@@ -96,6 +96,14 @@ export async function readDoc(doc: DocFile) {
   return { content: await file.text(), lastModified: file.lastModified };
 }
 
+export async function readDocIfChanged(doc: DocFile, knownModified: number) {
+  if (doc.nativePath) return invoke<{ content: string; lastModified: number } | null>("read_markdown", { path: doc.nativePath, knownModified });
+  if (!doc.handle) throw new Error("文件句柄不可用");
+  const file = await doc.handle.getFile();
+  if (file.lastModified === knownModified) return null;
+  return { content: await file.text(), lastModified: file.lastModified };
+}
+
 export async function writeDoc(doc: DocFile, content: string) {
   if (doc.nativePath) return invoke<number>("write_markdown", { path: doc.nativePath, content });
   if (!doc.handle) throw new Error("文件句柄不可用");
