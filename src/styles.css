@@ -637,3 +637,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid #60758e66; outlin
 .outline-panel > button { white-space: normal; overflow-wrap: anywhere; }
 .outline-collapsed .outline-header { margin: 0; }
 @media print { .outline-resizer { display: none !important; } }
+.brand-mark, .theme-dark .brand-mark,
+.welcome-art, .home-empty .welcome-art, .theme-dark .welcome-art {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  transform: none;
+}
