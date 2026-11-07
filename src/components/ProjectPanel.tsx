@@ -54,7 +54,6 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
   const allFiles = useMemo(() => projects.flatMap((project) => project.files), [projects]);
   const filesById = useMemo(() => new Map(allFiles.map((doc) => [doc.id, doc])), [allFiles]);
   const favoriteDocs = favoriteIds.map((id) => filesById.get(id)).filter((doc): doc is DocFile => Boolean(doc)).slice(0, 6);
-  const recentDocs = recentIds.map((id) => filesById.get(id)).filter((doc): doc is DocFile => Boolean(doc)).slice(0, 3);
   const activeProjectId = activeId ? filesById.get(activeId)?.projectId : undefined;
 
   useEffect(() => {
@@ -188,7 +187,6 @@ export function ProjectPanel({ width, projects, activeId, revealTarget, onAdd, o
       <div className="sidebar-label"><span>项目</span><button className={showEmptyFolders ? "active" : ""} type="button" title={showEmptyFolders ? "隐藏不含 Markdown 的文件夹" : "显示空文件夹和不含 Markdown 的文件夹"} onClick={() => { const next = !showEmptyFolders; setShowEmptyFolders(next); localStorage.setItem("zdocs:show-empty-folders", String(next)); }}>{showEmptyFolders ? "隐藏空目录" : "显示空目录"}</button><span>{projects.length}</span></div>
       <div className="projects-scroll">
         {!normalized && favoriteDocs.length > 0 && <QuickDocs title="收藏" icon={<Star size={13} />} docs={favoriteDocs} activeId={activeId} onOpen={onOpen} onContextMenu={showDocMenu} />}
-        {!normalized && recentDocs.length > 0 && <QuickDocs title="最近访问" icon={<Clock3 size={13} />} docs={recentDocs} activeId={activeId} onOpen={onOpen} onContextMenu={showDocMenu} />}
         {normalized && isSearching && <div className="searching-state"><span />正在搜索正文…</div>}
         {normalized && !isSearching && !hasSearchResults && <div className="search-empty">没有找到“{query.trim()}”<span>试试文件名、路径或正文关键词</span></div>}
         {visible.map((project) => <div key={project.id} data-project-id={project.id} className={`project-drag-shell ${draggingId === project.id ? "dragging" : ""} ${dropTarget?.id === project.id ? `drop-${dropTarget.position}` : ""}`}><ProjectTree project={project} activeId={activeId} revealDocId={revealTarget?.docId} revealRequest={revealTarget?.request} onOpen={onOpen} onContextMenu={showDocMenu} onFolderContextMenu={(event, path, name) => showFolderMenu(event, project.id, path, name)} onCreateEntry={(path) => onCreateEntry(project.id, path, "file")} onMoveEntry={(source, target) => onMoveEntry(project.id, source, target)} onConfigure={onConfigure} onRemove={onRemove} onRestore={onRestore} forceOpen={Boolean(normalized)} onDragStart={(event) => { draggingRef.current = project.id; setDraggingId(project.id); event.currentTarget.setPointerCapture(event.pointerId); document.body.classList.add("is-project-dragging"); }} onDragMove={moveProject} onDragEnd={stopProjectDrag} /></div>)}
